@@ -3,11 +3,11 @@ import os from "node:os";
 import path from "node:path";
 
 // Prépare une instance d'app isolée pour un fichier de test : DATA_DIR et
-// PHOTOS_DIR temporaires (dossiers dédiés, jamais partagés entre fichiers de
+// FILES_DIR temporaires (dossiers dédiés, jamais partagés entre fichiers de
 // test grâce à pool: "forks" dans vitest.config.ts), puis démarre le worker
 // en arrière-plan comme le fait normalement src/instrumentation.ts au
 // démarrage réel. Les variables d'env doivent être positionnées AVANT le
-// premier import de tout module qui touche DATA_DIR/PHOTOS_DIR
+// premier import de tout module qui touche DATA_DIR/FILES_DIR
 // (src/lib/paths.ts les lit une seule fois, au chargement) — d'où l'import
 // dynamique ici plutôt qu'un import statique en tête de fichier de test.
 export async function setupTestApp(prefix: string) {
@@ -18,7 +18,7 @@ export async function setupTestApp(prefix: string) {
   fs.mkdirSync(photosDir, { recursive: true });
 
   process.env.DATA_DIR = dataDir;
-  process.env.PHOTOS_DIR = photosDir;
+  process.env.FILES_DIR = photosDir;
   process.env.AUTH_USER = "test-admin";
   process.env.AUTH_PASSWORD = "test-secret";
 

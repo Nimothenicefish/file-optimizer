@@ -63,7 +63,7 @@ export async function GET(req: Request) {
 }
 
 // Met en file une sélection manuelle de fichiers (chemins relatifs à
-// PHOTOS_DIR, choisis en parcourant les dossiers côté UI).
+// FILES_DIR, choisis en parcourant les dossiers côté UI).
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const relPaths: string[] = Array.isArray(body?.paths) ? body.paths : [];

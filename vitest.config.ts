@@ -12,7 +12,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
     // Chaque fichier de test tourne dans son propre process (isole les
     // singletons globalThis.__db__ / __queueStarted__ de src/lib/db et
-    // src/lib/queue/worker.ts, qui dépendent de DATA_DIR/PHOTOS_DIR définis
+    // src/lib/queue/worker.ts, qui dépendent de DATA_DIR/FILES_DIR définis
     // par test).
     pool: "forks",
     testTimeout: 20000,

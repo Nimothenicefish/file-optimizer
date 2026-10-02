@@ -7,8 +7,8 @@ authentification par session, Docker.
 
 ## Fonctionnement
 
-- **Parcourir** (`/`) : navigue dans la bibliothèque de photos montée en
-  volume (`PHOTOS_DIR`), dossier par dossier.
+- **Parcourir** (`/`) : navigue dans la bibliothèque montée en volume
+  (`FILES_DIR`), dossier par dossier.
   - **Scanner ce dossier (récursif)** : trouve toutes les photos sous le
     dossier courant (sous-dossiers compris) et les met en file d'un coup.
   - **Sélection manuelle** : coche des photos précises en parcourant les

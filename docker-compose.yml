@@ -9,13 +9,13 @@ services:
       - "3100:3000"
     volumes:
       - ./data:/data
-      # Chemin hôte à adapter à ton NAS : la bibliothèque de photos à
-      # parcourir/optimiser, montée en lecture/écriture (l'app modifie les
+      # Chemin hôte à adapter à ton NAS : la bibliothèque (photos, puis vidéos)
+      # à parcourir/optimiser, montée en lecture/écriture (l'app modifie les
       # fichiers en place).
-      - /volume1/photos:/photos
+      - /volume1/files:/files
     environment:
       - DATA_DIR=/data
-      - PHOTOS_DIR=/photos
+      - FILES_DIR=/files
       - AUTH_USER=${AUTH_USER}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
       - AUTH_SECRET=${AUTH_SECRET:-}

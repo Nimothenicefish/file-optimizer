@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PHOTOS_DIR } from "@/lib/paths";
+import { FILES_DIR } from "@/lib/paths";
 import { ORIGIN_FOLDER_NAME, isSynologyEaDir } from "@/lib/naming";
 
 // Formats pris en charge : chacun est ré-encodé dans SON PROPRE format (pas
@@ -11,27 +11,27 @@ export const IMAGE_EXT = new Set(["jpg", "jpeg", "png", "webp", "avif"]);
 
 export class InvalidPathError extends Error {}
 
-// Résout un chemin relatif (fourni par le client) sous PHOTOS_DIR, en
+// Résout un chemin relatif (fourni par le client) sous FILES_DIR, en
 // empêchant toute sortie du dossier (../, chemin absolu, etc).
 export function resolvePhotoPath(relPath: string): string {
   const clean = (relPath || "").replace(/^[/\\]+/, "");
-  const resolved = path.resolve(PHOTOS_DIR, clean);
-  if (resolved !== PHOTOS_DIR && !resolved.startsWith(PHOTOS_DIR + path.sep)) {
+  const resolved = path.resolve(FILES_DIR, clean);
+  if (resolved !== FILES_DIR && !resolved.startsWith(FILES_DIR + path.sep)) {
     throw new InvalidPathError("Chemin invalide");
   }
   return resolved;
 }
 
-// Inverse de resolvePhotoPath : chemin absolu -> relatif à PHOTOS_DIR,
+// Inverse de resolvePhotoPath : chemin absolu -> relatif à FILES_DIR,
 // toujours avec des "/" (même sous Windows en dev), utilisable tel quel dans
 // les appels API/URLs.
 export function toPhotoRelPath(absPath: string): string {
-  return path.relative(PHOTOS_DIR, absPath).split(path.sep).join("/");
+  return path.relative(FILES_DIR, absPath).split(path.sep).join("/");
 }
 
 export type BrowseEntry = {
   name: string;
-  path: string; // relatif à PHOTOS_DIR
+  path: string; // relatif à FILES_DIR
   type: "directory" | "image" | "other";
   size?: number;
 };

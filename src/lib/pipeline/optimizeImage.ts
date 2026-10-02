@@ -29,7 +29,7 @@ function moveToOriginFolder(filePath: string): void {
   const base = path.basename(filePath, ext);
   let target = path.join(originDir, path.basename(filePath));
   let counter = 1;
-  // turbopackIgnore : "target" est une photo dans PHOTOS_DIR (volume monté au
+  // turbopackIgnore : "target" est une photo dans FILES_DIR (volume monté au
   // runtime), jamais un fichier du projet — sans cette annotation, l'analyse
   // statique de Turbopack trace (et embarque) tout le projet dans la sortie
   // standalone à cause de ce chemin dynamique.

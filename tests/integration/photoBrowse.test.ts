@@ -33,7 +33,7 @@ afterAll(() => {
   cleanupTestApp(tmpDir);
 });
 
-describe("resolvePhotoPath — empêche toute sortie de PHOTOS_DIR", () => {
+describe("resolvePhotoPath — empêche toute sortie de FILES_DIR", () => {
   it("résout un chemin relatif normal", () => {
     expect(resolvePhotoPath("vacances")).toBe(path.join(photosDir, "vacances"));
   });
