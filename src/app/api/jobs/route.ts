@@ -12,6 +12,22 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+
+  // Récupération ciblée d'un lot de jobs par id (suivi de la progression
+  // d'un batch scan/optimisation depuis la page de navigation) — pas de
+  // pagination ni de filtre de statut dans ce cas, on veut tout le lot.
+  const idsParam = searchParams.get("ids") ?? "";
+  if (idsParam) {
+    const ids = idsParam
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+    if (ids.length === 0) return NextResponse.json({ jobs: [] });
+    const placeholders = ids.map(() => "?").join(",");
+    const jobs = db.prepare(`SELECT * FROM jobs WHERE id IN (${placeholders})`).all(...ids);
+    return NextResponse.json({ jobs });
+  }
+
   const status = searchParams.get("status") ?? "";
   const page = Math.max(1, Math.trunc(Number(searchParams.get("page")) || 1));
   const pageSize = Math.min(
@@ -69,9 +85,9 @@ export async function POST(req: Request) {
     throw err;
   }
 
-  const { queued, skippedAlreadyQueued } = enqueuePhotos(
+  const { queued, skippedAlreadyQueued, ids } = enqueuePhotos(
     filePaths.map((filePath) => ({ filePath, maxDimension, quality, keepOriginal }))
   );
 
-  return NextResponse.json({ queued, skippedAlreadyQueued });
+  return NextResponse.json({ queued, skippedAlreadyQueued, ids });
 }

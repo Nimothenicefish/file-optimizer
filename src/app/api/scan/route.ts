@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     throw err;
   }
 
-  const { queued, skippedAlreadyQueued } = enqueuePhotos(
+  const { queued, skippedAlreadyQueued, ids } = enqueuePhotos(
     files.map((filePath) => ({ filePath, maxDimension, quality, keepOriginal }))
   );
 
@@ -37,5 +37,6 @@ export async function POST(req: Request) {
     found: files.length,
     queued,
     skippedAlreadyQueued,
+    ids,
   });
 }

@@ -52,6 +52,7 @@ describe("POST /api/scan — scan récursif", () => {
     expect(data.found).toBe(2);
     expect(data.queued).toBe(2);
     expect(data.skippedAlreadyQueued).toBe(0);
+    expect(data.ids).toHaveLength(2);
 
     const rows = db
       .prepare("SELECT max_dimension, quality, keep_original FROM jobs ORDER BY created_at")
@@ -84,6 +85,16 @@ describe("GET /api/jobs — recap par statut", () => {
     const data = await res.json();
     expect(data.total).toBeGreaterThanOrEqual(2);
     expect(data.statusCounts.pending + data.statusCounts.running + data.statusCounts.done).toBeGreaterThanOrEqual(2);
+  });
+
+  it("filtre par ids (suivi de batch) sans pagination ni filtre de statut", async () => {
+    const all = db.prepare("SELECT id FROM jobs ORDER BY created_at LIMIT 2").all() as Array<{ id: string }>;
+    const res = await jobsRoute.GET(
+      new Request(`http://localhost/api/jobs?ids=${all.map((r) => r.id).join(",")}`)
+    );
+    const data = await res.json();
+    expect(data.jobs).toHaveLength(2);
+    expect(new Set(data.jobs.map((j: { id: string }) => j.id))).toEqual(new Set(all.map((r) => r.id)));
   });
 });
 

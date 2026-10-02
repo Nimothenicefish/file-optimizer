@@ -8,7 +8,7 @@ export type EnqueueParams = {
   keepOriginal: boolean;
 };
 
-export type EnqueueOutcome = { queued: number; skippedAlreadyQueued: number };
+export type EnqueueOutcome = { queued: number; skippedAlreadyQueued: number; ids: string[] };
 
 // Met en file un lot de photos. Ignore (sans erreur) tout fichier ayant déjà
 // un job "pending"/"running" — relancer un scan sur un dossier dont le
@@ -24,23 +24,20 @@ export function enqueuePhotos(photos: EnqueueParams[]): EnqueueOutcome {
 
   let queued = 0;
   let skippedAlreadyQueued = 0;
+  const ids: string[] = [];
 
   for (const photo of photos) {
     if (existsActive.get(photo.filePath)) {
       skippedAlreadyQueued++;
       continue;
     }
-    insert.run(
-      randomUUID(),
-      photo.filePath,
-      photo.maxDimension,
-      photo.quality,
-      photo.keepOriginal ? 1 : 0
-    );
+    const id = randomUUID();
+    insert.run(id, photo.filePath, photo.maxDimension, photo.quality, photo.keepOriginal ? 1 : 0);
+    ids.push(id);
     queued++;
   }
 
-  return { queued, skippedAlreadyQueued };
+  return { queued, skippedAlreadyQueued, ids };
 }
 
 export function hasActiveJob(filePath: string): boolean {

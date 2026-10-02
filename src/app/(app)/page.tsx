@@ -1,12 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRight, File, Folder, Image as ImageIcon, ScanSearch, X } from "lucide-react";
+import {
+  ChevronRight,
+  File,
+  Folder,
+  Image as ImageIcon,
+  Loader2,
+  ScanSearch,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatSize } from "@/lib/format";
 
 type Entry = {
   name: string;
@@ -15,13 +32,19 @@ type Entry = {
   size?: number;
 };
 
-function formatSize(bytes?: number): string {
-  if (bytes == null) return "—";
-  if (bytes < 1024) return `${bytes} o`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} Go`;
-}
+type BatchJob = {
+  id: string;
+  status: string;
+  original_size: number | null;
+  optimized_size: number | null;
+};
+
+type BatchSummary = {
+  count: number;
+  errors: number;
+  originalTotal: number;
+  optimizedTotal: number;
+};
 
 function breadcrumbs(path: string): Array<{ label: string; path: string }> {
   const parts = path ? path.split("/") : [];
@@ -46,6 +69,45 @@ export default function BrowsePage() {
 
   const [scanning, setScanning] = useState(false);
   const [enqueuing, setEnqueuing] = useState(false);
+
+  const [batchIds, setBatchIds] = useState<string[] | null>(null);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
+  const [summary, setSummary] = useState<BatchSummary | null>(null);
+
+  function startBatch(newIds: string[]) {
+    if (newIds.length === 0) return;
+    setBatchIds((prev) => (prev ? [...prev, ...newIds] : newIds));
+  }
+
+  useEffect(() => {
+    if (!batchIds || batchIds.length === 0) return;
+    let cancelled = false;
+
+    async function poll() {
+      const res = await fetch(`/api/jobs?ids=${batchIds!.join(",")}`);
+      const data = await res.json();
+      if (cancelled) return;
+      const jobs: BatchJob[] = data.jobs ?? [];
+      const terminal = jobs.filter((j) => j.status !== "pending" && j.status !== "running");
+      setBatchProgress({ done: terminal.length, total: batchIds!.length });
+      if (jobs.length === batchIds!.length && terminal.length === jobs.length) {
+        setSummary({
+          count: jobs.length,
+          errors: jobs.filter((j) => j.status === "error" || j.status === "cancelled").length,
+          originalTotal: jobs.reduce((sum, j) => sum + (j.original_size ?? 0), 0),
+          optimizedTotal: jobs.reduce((sum, j) => sum + (j.optimized_size ?? 0), 0),
+        });
+        setBatchIds(null);
+      }
+    }
+
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [batchIds]);
 
   const load = useCallback(async (nextPath: string) => {
     setLoading(true);
@@ -99,6 +161,7 @@ export default function BrowsePage() {
       const parts = [`${data.found} photo(s) trouvée(s)`, `${data.queued} mise(s) en file`];
       if (data.skippedAlreadyQueued > 0) parts.push(`${data.skippedAlreadyQueued} déjà en file`);
       toast.success(parts.join(", "));
+      startBatch(data.ids ?? []);
     } finally {
       setScanning(false);
     }
@@ -121,6 +184,7 @@ export default function BrowsePage() {
       const parts = [`${data.queued} mise(s) en file`];
       if (data.skippedAlreadyQueued > 0) parts.push(`${data.skippedAlreadyQueued} déjà en file`);
       toast.success(parts.join(", "));
+      startBatch(data.ids ?? []);
       setSelected(new Set());
     } finally {
       setEnqueuing(false);
@@ -278,6 +342,57 @@ export default function BrowsePage() {
           </Button>
         </div>
       )}
+
+      {batchIds && (
+        <div className="panel sticky bottom-4 flex items-center gap-3 p-4">
+          <Loader2 className="size-4 animate-spin text-primary" />
+          <span className="text-sm font-medium">
+            Optimisation en cours… {batchProgress.done} / {batchProgress.total}
+          </span>
+        </div>
+      )}
+
+      <Dialog open={summary != null} onOpenChange={(open) => !open && setSummary(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="size-5 text-primary" />
+              Optimisation terminée
+            </DialogTitle>
+            <DialogDescription>
+              {summary?.count} photo(s) traitée(s)
+              {summary && summary.errors > 0 ? `, dont ${summary.errors} en erreur` : ""}.
+            </DialogDescription>
+          </DialogHeader>
+          {summary && (
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="panel p-3">
+                <p className="text-xs text-muted-foreground">Avant</p>
+                <p className="text-lg font-semibold">{formatSize(summary.originalTotal)}</p>
+              </div>
+              <div className="panel p-3">
+                <p className="text-xs text-muted-foreground">Après</p>
+                <p className="text-lg font-semibold">{formatSize(summary.optimizedTotal)}</p>
+              </div>
+              <div className="col-span-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-center">
+                <p className="text-xs text-muted-foreground">Espace gagné</p>
+                <p className="text-2xl font-bold text-primary">
+                  {formatSize(Math.max(0, summary.originalTotal - summary.optimizedTotal))}
+                </p>
+                {summary.originalTotal > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    -
+                    {Math.round(
+                      ((summary.originalTotal - summary.optimizedTotal) / summary.originalTotal) * 100
+                    )}
+                    %
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
