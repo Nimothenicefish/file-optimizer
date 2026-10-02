@@ -16,7 +16,8 @@ authentification par session, Docker.
     envoyée), puis "Optimiser la sélection".
   - Réglages communs aux deux : taille max (plus grand côté, en pixels),
     qualité (JPEG/WebP/AVIF ; un PNG est toujours recompressé sans perte,
-    indépendamment de ce réglage), conservation des originaux.
+    indépendamment de ce réglage), conservation des originaux, conversion
+    forcée en JPG (désactivée par défaut).
 - **Traitements** (`/jobs`) : liste des jobs (un job = une photo), filtrable
   par statut, avec détails (log, taille avant/après) et actions groupées
   (annuler les jobs en attente sélectionnés, supprimer tous les jobs en
@@ -29,6 +30,27 @@ JPEG, PNG, WebP, AVIF — chacun est ré-encodé dans **son propre format**
 transparence, un WebP reste un WebP. Un fichier dans un autre format
 (TIFF, BMP, GIF...) n'est ni listé comme image ni pris en compte par le scan
 récursif.
+
+### Forcer la conversion en JPG
+
+Désactivée par défaut. JPEG est une compression à perte plus agressive qu'un
+PNG recompressé sans perte : certains fichiers (captures d'écran, graphiques)
+ne gagnent presque rien en PNG mais chutent nettement une fois convertis en
+JPG — cette option permet d'être sûr de gagner de la place dans ces cas-là.
+Sans effet sur un fichier déjà en JPEG. La transparence éventuelle (PNG/WebP/
+AVIF) est perdue : le fond transparent est aplati en blanc. Le fichier résultat
+change d'extension (`photo.png` → `photo.jpg`) ; en cas de collision avec un
+fichier du même nom déjà présent, un suffixe numérique est ajouté. Le garde-fou
+"jamais plus gros qu'avant" (voir ci-dessous) s'applique aussi à cette
+conversion : si le JPG obtenu n'est pas plus petit, le fichier d'origine est
+gardé tel quel.
+
+### Jamais de fichier plus gros qu'avant
+
+Un ré-encodage ne réduit pas toujours la taille (photo déjà bien compressée
+par le téléphone/l'appareil, qualité demandée supérieure à celle d'origine).
+Si le résultat n'est pas plus petit que l'original, le fichier est laissé
+intact — aucun dossier `origin/` créé puisqu'il n'y a rien à sauvegarder.
 
 ### Conservation des originaux
 

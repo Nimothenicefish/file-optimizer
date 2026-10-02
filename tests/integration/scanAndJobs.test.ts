@@ -57,13 +57,15 @@ describe("POST /api/scan — scan récursif", () => {
     expect(data.ids).toHaveLength(2);
 
     const rows = db
-      .prepare("SELECT max_dimension, quality, keep_original FROM jobs ORDER BY created_at")
-      .all() as Array<{ max_dimension: number; quality: number; keep_original: number }>;
+      .prepare("SELECT max_dimension, quality, keep_original, force_jpeg FROM jobs ORDER BY created_at")
+      .all() as Array<{ max_dimension: number; quality: number; keep_original: number; force_jpeg: number }>;
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row.max_dimension).toBe(1234);
       expect(row.quality).toBe(77);
       expect(row.keep_original).toBe(0);
+      // forceJpeg non fourni dans la requête : doit rester désactivé par défaut.
+      expect(row.force_jpeg).toBe(0);
     }
   });
 
@@ -78,6 +80,22 @@ describe("POST /api/scan — scan récursif", () => {
   it("refuse un chemin invalide (tentative de traversée)", async () => {
     const res = await scanRequest({ path: "../../etc" });
     expect(res.status).toBe(400);
+  });
+
+  it("propage forceJpeg: true jusqu'au job créé", async () => {
+    fs.mkdirSync(path.join(photosDir, "album2"), { recursive: true });
+    await sharp({ create: { width: 200, height: 200, channels: 3, background: { r: 7, g: 8, b: 9 } } })
+      .png()
+      .toFile(path.join(photosDir, "album2", "photo3.png"));
+
+    const res = await scanRequest({ path: "album2", forceJpeg: true });
+    const data = await res.json();
+    expect(data.queued).toBe(1);
+
+    const row = db
+      .prepare("SELECT force_jpeg FROM jobs WHERE id = ?")
+      .get(data.ids[0]) as { force_jpeg: number };
+    expect(row.force_jpeg).toBe(1);
   });
 });
 

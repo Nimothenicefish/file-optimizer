@@ -9,6 +9,17 @@ declare global {
   var __db__: Database.Database | undefined;
 }
 
+// Ajoute une colonne à une table existante si elle n'y est pas déjà — pour
+// une base déployée AVANT l'ajout de cette colonne (le CREATE TABLE IF NOT
+// EXISTS ci-dessous ne modifie jamais une table déjà créée). Sans danger à
+// rappeler à chaque démarrage : no-op si la colonne existe déjà.
+function ensureColumn(instance: Database.Database, table: string, column: string, definition: string) {
+  const columns = instance.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((c) => c.name === column)) {
+    instance.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
 function createDb() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const instance = new Database(DB_PATH);
@@ -26,6 +37,7 @@ function createDb() {
       max_dimension INTEGER NOT NULL,
       quality INTEGER NOT NULL,
       keep_original INTEGER NOT NULL DEFAULT 1,
+      force_jpeg INTEGER NOT NULL DEFAULT 0,
       original_size INTEGER,
       optimized_size INTEGER,
       error TEXT,
@@ -55,6 +67,8 @@ function createDb() {
     CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_jobs_file_path ON jobs(file_path);
   `);
+
+  ensureColumn(instance, "jobs", "force_jpeg", "INTEGER NOT NULL DEFAULT 0");
 
   instance
     .prepare(

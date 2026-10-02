@@ -69,6 +69,7 @@ export default function BrowsePage() {
   const [maxDimension, setMaxDimension] = useState(4000);
   const [quality, setQuality] = useState(85);
   const [keepOriginal, setKeepOriginal] = useState(true);
+  const [forceJpeg, setForceJpeg] = useState(false);
 
   const [scanning, setScanning] = useState(false);
   const [enqueuing, setEnqueuing] = useState(false);
@@ -176,7 +177,7 @@ export default function BrowsePage() {
       const res = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, maxDimension, quality, keepOriginal }),
+        body: JSON.stringify({ path, maxDimension, quality, keepOriginal, forceJpeg }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -199,7 +200,13 @@ export default function BrowsePage() {
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paths: [...selected], maxDimension, quality, keepOriginal }),
+        body: JSON.stringify({
+          paths: [...selected],
+          maxDimension,
+          quality,
+          keepOriginal,
+          forceJpeg,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -260,7 +267,18 @@ export default function BrowsePage() {
             <Checkbox checked={keepOriginal} onCheckedChange={(c) => setKeepOriginal(c === true)} />
             Conserver les originaux (dossier &quot;origin&quot;)
           </Label>
+          <Label className="flex items-center gap-2 pb-1.5">
+            <Checkbox checked={forceJpeg} onCheckedChange={(c) => setForceJpeg(c === true)} />
+            Forcer la conversion en JPG
+          </Label>
         </div>
+        {forceJpeg && (
+          <p className="text-xs text-muted-foreground">
+            Convertit les PNG/WebP/AVIF en JPG (gain de place quasi garanti grâce à la compression
+            à perte, mais perd la transparence éventuelle — fond blanc à la place). Sans effet sur
+            un fichier déjà en JPEG.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">

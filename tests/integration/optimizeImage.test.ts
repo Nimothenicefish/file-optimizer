@@ -89,6 +89,137 @@ describe("optimizeImage — conserve le format d'origine (pas de conversion vers
   });
 });
 
+describe("optimizeImage — forceJpeg : conversion forcée en JPG", () => {
+  it("convertit un PNG avec transparence en JPG (fond blanc) et supprime l'ancien fichier", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "graphic.png");
+    const width = 300;
+    const height = 300;
+    // Bruit RGBA (pas de zones plates) : un PNG lossless compresse mal du
+    // bruit, un JPEG qualité 85 nettement mieux — garantit que la conversion
+    // réduit réellement la taille (sinon le garde-fou "jamais plus gros"
+    // annulerait la conversion, voir plus bas).
+    const raw = Buffer.alloc(width * height * 4);
+    for (let i = 0; i < raw.length; i++) raw[i] = Math.floor(Math.random() * 256);
+    // Un coin entièrement transparent, pour vérifier l'aplatissement sur blanc.
+    for (let y = 0; y < 20; y++) {
+      for (let x = 0; x < 20; x++) {
+        raw[(y * width + x) * 4 + 3] = 0;
+      }
+    }
+    await sharp(raw, { raw: { width, height, channels: 4 } }).png().toFile(filePath);
+
+    const result = await optimizeImage({
+      filePath,
+      maxDimension: 2000,
+      quality: 85,
+      keepOriginal: false,
+      forceJpeg: true,
+    });
+
+    const jpgPath = path.join(dir, "graphic.jpg");
+    expect(result.finalPath).toBe(jpgPath);
+    expect(fs.existsSync(jpgPath)).toBe(true);
+    expect(fs.existsSync(filePath)).toBe(false);
+
+    const output = sharp(fs.readFileSync(jpgPath));
+    const meta = await output.metadata();
+    expect(meta.format).toBe("jpeg");
+    expect(meta.hasAlpha).toBe(false);
+
+    const corner = await output.clone().extract({ left: 0, top: 0, width: 1, height: 1 }).raw().toBuffer();
+    expect(Array.from(corner.subarray(0, 3))).toEqual([255, 255, 255]);
+  });
+
+  it("conserve l'original dans origin/ (pas de suppression) quand keepOriginal est aussi activé", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "graphic.png");
+    const width = 300;
+    const height = 300;
+    const raw = Buffer.alloc(width * height * 3);
+    for (let i = 0; i < raw.length; i++) raw[i] = Math.floor(Math.random() * 256);
+    await sharp(raw, { raw: { width, height, channels: 3 } }).png().toFile(filePath);
+
+    const result = await optimizeImage({
+      filePath,
+      maxDimension: 2000,
+      quality: 85,
+      keepOriginal: true,
+      forceJpeg: true,
+    });
+
+    expect(fs.existsSync(path.join(dir, "origin", "graphic.png"))).toBe(true);
+    expect(fs.existsSync(result.finalPath)).toBe(true);
+    expect(result.finalPath).toBe(path.join(dir, "graphic.jpg"));
+  });
+
+  it("n'a aucun effet sur un fichier déjà en JPEG (pas de renommage)", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "photo.jpg");
+    await sharp({ create: { width: 500, height: 500, channels: 3, background: { r: 5, g: 10, b: 15 } } })
+      .jpeg({ quality: 95 })
+      .toFile(filePath);
+
+    const result = await optimizeImage({
+      filePath,
+      maxDimension: 2000,
+      quality: 85,
+      keepOriginal: false,
+      forceJpeg: true,
+    });
+
+    expect(result.finalPath).toBe(filePath);
+    expect(fs.existsSync(filePath)).toBe(true);
+  });
+
+  it("évite d'écraser un fichier .jpg déjà présent du même nom (suffixe numérique)", async () => {
+    const dir = mkTempDir();
+    const pngPath = path.join(dir, "graphic.png");
+    const existingJpgPath = path.join(dir, "graphic.jpg");
+
+    const width = 300;
+    const height = 300;
+    const raw = Buffer.alloc(width * height * 3);
+    for (let i = 0; i < raw.length; i++) raw[i] = Math.floor(Math.random() * 256);
+    await sharp(raw, { raw: { width, height, channels: 3 } }).png().toFile(pngPath);
+    fs.writeFileSync(existingJpgPath, "contenu existant, ne doit pas être touché");
+
+    const result = await optimizeImage({
+      filePath: pngPath,
+      maxDimension: 2000,
+      quality: 85,
+      keepOriginal: false,
+      forceJpeg: true,
+    });
+
+    expect(result.finalPath).toBe(path.join(dir, "graphic_1.jpg"));
+    expect(fs.readFileSync(existingJpgPath, "utf8")).toBe("contenu existant, ne doit pas être touché");
+    expect(fs.existsSync(pngPath)).toBe(false);
+  });
+
+  it("garde le PNG original si la conversion forcée en JPG ne réduit pas la taille", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "tiny.png");
+    await sharp({ create: { width: 4, height: 4, channels: 3, background: { r: 10, g: 10, b: 10 } } })
+      .png()
+      .toFile(filePath);
+    const originalBytes = fs.readFileSync(filePath);
+
+    const result = await optimizeImage({
+      filePath,
+      maxDimension: 2000,
+      quality: 85,
+      keepOriginal: false,
+      forceJpeg: true,
+    });
+
+    expect(result.finalPath).toBe(filePath);
+    expect(result.optimizedSize).toBe(result.originalSize);
+    expect(fs.readFileSync(filePath).equals(originalBytes)).toBe(true);
+    expect(fs.existsSync(path.join(dir, "tiny.jpg"))).toBe(false);
+  });
+});
+
 describe("optimizeImage — conservation de l'original (keepOriginal: true)", () => {
   it("déplace l'original dans origin/ à côté du fichier, et l'emplacement d'origine contient la version optimisée", async () => {
     const dir = mkTempDir();

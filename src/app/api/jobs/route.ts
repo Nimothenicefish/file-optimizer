@@ -75,6 +75,7 @@ export async function POST(req: Request) {
   const maxDimension = clampInt(body?.maxDimension, DEFAULT_MAX_DIMENSION, 100, 20000);
   const quality = clampInt(body?.quality, DEFAULT_QUALITY, 1, 100);
   const keepOriginal = body?.keepOriginal !== false;
+  const forceJpeg = body?.forceJpeg === true;
 
   let filePaths: string[];
   try {
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
   }
 
   const { queued, skippedAlreadyQueued, ids } = enqueuePhotos(
-    filePaths.map((filePath) => ({ filePath, maxDimension, quality, keepOriginal }))
+    filePaths.map((filePath) => ({ filePath, maxDimension, quality, keepOriginal, forceJpeg }))
   );
 
   return NextResponse.json({ queued, skippedAlreadyQueued, ids });

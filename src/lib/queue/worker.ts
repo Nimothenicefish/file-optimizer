@@ -12,6 +12,7 @@ type JobRow = {
   max_dimension: number;
   quality: number;
   keep_original: number;
+  force_jpeg: number;
 };
 
 function appendLog(jobId: string, line: string) {
@@ -41,18 +42,17 @@ async function processJob(job: JobRow) {
       maxDimension: job.max_dimension,
       quality: job.quality,
       keepOriginal: job.keep_original === 1,
+      forceJpeg: job.force_jpeg === 1,
       onProgress: (msg) => appendLog(job.id, msg),
     });
 
-    db.prepare("UPDATE jobs SET original_size = ?, optimized_size = ? WHERE id = ?").run(
-      result.originalSize,
-      result.optimizedSize,
-      job.id
-    );
-    appendLog(
-      job.id,
-      `optimisé : ${result.originalSize} -> ${result.optimizedSize} octets`
-    );
+    db.prepare(
+      "UPDATE jobs SET original_size = ?, optimized_size = ?, file_path = ? WHERE id = ?"
+    ).run(result.originalSize, result.optimizedSize, result.finalPath, job.id);
+    appendLog(job.id, `optimisé : ${result.originalSize} -> ${result.optimizedSize} octets`);
+    if (result.finalPath !== job.file_path) {
+      appendLog(job.id, `converti en JPG : ${result.finalPath}`);
+    }
     setStatus(job.id, "done");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -9,13 +9,40 @@ export type OptimizeImageParams = {
   maxDimension: number;
   quality: number;
   keepOriginal: boolean;
+  forceJpeg?: boolean;
   onProgress?: (message: string) => void;
 };
 
 export type OptimizeImageResult = {
   originalSize: number;
   optimizedSize: number;
+  // Chemin final du fichier (identique à filePath, sauf conversion forcée en
+  // JPG d'une source dans un autre format : l'extension change alors).
+  finalPath: string;
 };
+
+const JPEG_EXTS = new Set(["jpg", "jpeg"]);
+
+// Chemin de sortie si le format change (conversion forcée en JPG) : même nom,
+// nouvelle extension, en évitant toute collision avec un fichier déjà présent
+// (ex: photo.png ET photo.jpg existaient déjà tous les deux).
+function resolveOutputPath(filePath: string, targetExt: string): string {
+  const sourceExt = path.extname(filePath).slice(1).toLowerCase();
+  if (targetExt === sourceExt) return filePath;
+
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath, path.extname(filePath));
+  // turbopackIgnore : chemin dynamique sous FILES_DIR (volume monté au
+  // runtime), jamais un fichier du projet — voir la même annotation dans
+  // moveToOriginFolder ci-dessous pour le contexte complet.
+  let target = path.join(/*turbopackIgnore: true*/ dir, `${base}.${targetExt}`);
+  let counter = 1;
+  while (fs.existsSync(/*turbopackIgnore: true*/ target)) {
+    target = path.join(/*turbopackIgnore: true*/ dir, `${base}_${counter}.${targetExt}`);
+    counter++;
+  }
+  return target;
+}
 
 // Déplace le fichier source vers <dossier>/origin/<nom>, en évitant toute
 // collision avec un original déjà préservé lors d'un run précédent (ajoute un
@@ -44,9 +71,12 @@ function moveToOriginFolder(filePath: string): void {
 // décodage (shrink-on-load, borne la mémoire quelle que soit la taille
 // source — voir src/lib/imageLimits.ts) et ré-encode dans SON PROPRE format
 // (jamais de conversion vers un format universel, pour ne jamais perdre la
-// transparence d'un PNG ni changer l'extension/contenu d'un fichier).
+// transparence d'un PNG ni changer l'extension/contenu d'un fichier) — sauf
+// si forceJpeg est demandé explicitement : conversion en JPG garantissant
+// dans certains cas un gain de place (compression à perte plus agressive
+// qu'un PNG recompressé sans perte), au prix de la transparence éventuelle.
 export async function optimizeImage(params: OptimizeImageParams): Promise<OptimizeImageResult> {
-  const { filePath, maxDimension, quality, keepOriginal, onProgress } = params;
+  const { filePath, maxDimension, quality, keepOriginal, forceJpeg = false, onProgress } = params;
 
   const originalBuffer = fs.readFileSync(filePath);
   const originalSize = originalBuffer.length;
@@ -75,9 +105,15 @@ export async function optimizeImage(params: OptimizeImageParams): Promise<Optimi
     );
   }
 
-  const ext = path.extname(filePath).slice(1).toLowerCase();
+  const sourceExt = path.extname(filePath).slice(1).toLowerCase();
+  // Forcer en JPG n'a de sens que si la source n'est pas déjà un JPEG —
+  // sinon on garde juste le ré-encodage normal (pas de renommage inutile
+  // .jpeg -> .jpg).
+  const targetExt = forceJpeg && !JPEG_EXTS.has(sourceExt) ? "jpg" : sourceExt;
+  const convertingToJpeg = targetExt !== sourceExt;
+
   let output: Buffer;
-  switch (ext) {
+  switch (targetExt) {
     case "png":
       // Pas de notion de "qualité" standard pour un PNG (sans palette) :
       // compressionLevel au maximum applique une optimisation lossless
@@ -91,10 +127,19 @@ export async function optimizeImage(params: OptimizeImageParams): Promise<Optimi
     case "avif":
       output = await image.avif({ quality }).toBuffer();
       break;
-    default:
-      // jpg/jpeg
-      output = await image.jpeg({ quality, mozjpeg: true }).toBuffer();
+    default: {
+      // jpg/jpeg (y compris une conversion forcée depuis un autre format).
+      let pipeline = image;
+      if (convertingToJpeg && metadata.hasAlpha) {
+        // JPEG ne supporte pas la transparence : aplati sur fond blanc
+        // plutôt que de laisser sharp aplatir sur noir par défaut (surprenant
+        // pour une capture d'écran/un graphique à fond transparent).
+        pipeline = pipeline.flatten({ background: { r: 255, g: 255, b: 255 } });
+        onProgress?.("transparence aplatie sur fond blanc (conversion forcée en JPG)");
+      }
+      output = await pipeline.jpeg({ quality, mozjpeg: true }).toBuffer();
       break;
+    }
   }
 
   // Un ré-encodage ne réduit pas TOUJOURS la taille (photo déjà bien
@@ -107,18 +152,26 @@ export async function optimizeImage(params: OptimizeImageParams): Promise<Optimi
     onProgress?.(
       `déjà optimale (${originalSize} octets, le ré-encodage donnait ${output.length}) : fichier conservé tel quel`
     );
-    return { originalSize, optimizedSize: originalSize };
+    return { originalSize, optimizedSize: originalSize, finalPath: filePath };
   }
 
   const optimizedSize = output.length;
-  const tmpPath = `${filePath}.tmp`;
+  const outputPath = resolveOutputPath(filePath, targetExt);
+  const tmpPath = `${outputPath}.tmp`;
   fs.writeFileSync(tmpPath, output);
 
   if (keepOriginal) {
     moveToOriginFolder(filePath);
   }
 
-  fs.renameSync(tmpPath, filePath);
+  fs.renameSync(tmpPath, outputPath);
 
-  return { originalSize, optimizedSize };
+  if (!keepOriginal && outputPath !== filePath) {
+    // Le format a changé (conversion forcée en JPG) : l'ancien fichier
+    // (autre extension) doit disparaître, sinon il reste en double à côté
+    // du nouveau.
+    fs.unlinkSync(filePath);
+  }
+
+  return { originalSize, optimizedSize, finalPath: outputPath };
 }

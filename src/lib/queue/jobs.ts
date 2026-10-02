@@ -6,6 +6,7 @@ export type EnqueueParams = {
   maxDimension: number;
   quality: number;
   keepOriginal: boolean;
+  forceJpeg: boolean;
 };
 
 export type EnqueueOutcome = { queued: number; skippedAlreadyQueued: number; ids: string[] };
@@ -18,8 +19,8 @@ export function enqueuePhotos(photos: EnqueueParams[]): EnqueueOutcome {
     "SELECT id FROM jobs WHERE file_path = ? AND status IN ('pending', 'running')"
   );
   const insert = db.prepare(
-    `INSERT INTO jobs (id, file_path, status, max_dimension, quality, keep_original)
-     VALUES (?, ?, 'pending', ?, ?, ?)`
+    `INSERT INTO jobs (id, file_path, status, max_dimension, quality, keep_original, force_jpeg)
+     VALUES (?, ?, 'pending', ?, ?, ?, ?)`
   );
 
   let queued = 0;
@@ -32,7 +33,14 @@ export function enqueuePhotos(photos: EnqueueParams[]): EnqueueOutcome {
       continue;
     }
     const id = randomUUID();
-    insert.run(id, photo.filePath, photo.maxDimension, photo.quality, photo.keepOriginal ? 1 : 0);
+    insert.run(
+      id,
+      photo.filePath,
+      photo.maxDimension,
+      photo.quality,
+      photo.keepOriginal ? 1 : 0,
+      photo.forceJpeg ? 1 : 0
+    );
     ids.push(id);
     queued++;
   }

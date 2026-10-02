@@ -22,6 +22,7 @@ type Job = {
   max_dimension: number;
   quality: number;
   keep_original: number;
+  force_jpeg: number;
   original_size: number | null;
   optimized_size: number | null;
   error: string | null;
@@ -304,7 +305,8 @@ export default function JobsPage() {
             <DialogTitle className="truncate font-mono text-sm">{logJob?.file_path}</DialogTitle>
             <DialogDescription>
               Taille max : {logJob?.max_dimension}px · Qualité : {logJob?.quality} · Conserve
-              l&apos;original : {logJob?.keep_original ? "oui" : "non"}
+              l&apos;original : {logJob?.keep_original ? "oui" : "non"} · Force JPG :{" "}
+              {logJob?.force_jpeg ? "oui" : "non"}
             </DialogDescription>
           </DialogHeader>
           <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs text-foreground">
