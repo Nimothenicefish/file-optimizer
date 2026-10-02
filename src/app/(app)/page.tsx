@@ -9,6 +9,7 @@ import {
   Folder,
   Image as ImageIcon,
   Loader2,
+  RefreshCw,
   ScanSearch,
   Sparkles,
   X,
@@ -262,22 +263,33 @@ export default function BrowsePage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1 text-sm">
-        {breadcrumbs(path).map((crumb, i, arr) => (
-          <span key={crumb.path} className="flex items-center gap-1">
-            <button
-              onClick={() => setPath(crumb.path)}
-              className={
-                i === arr.length - 1
-                  ? "rounded-md px-1.5 py-0.5 font-medium text-foreground"
-                  : "rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-              }
-            >
-              {crumb.label}
-            </button>
-            {i < arr.length - 1 && <ChevronRight className="size-3.5 text-muted-foreground/60" />}
-          </span>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1 text-sm">
+          {breadcrumbs(path).map((crumb, i, arr) => (
+            <span key={crumb.path} className="flex items-center gap-1">
+              <button
+                onClick={() => setPath(crumb.path)}
+                className={
+                  i === arr.length - 1
+                    ? "rounded-md px-1.5 py-0.5 font-medium text-foreground"
+                    : "rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                }
+              >
+                {crumb.label}
+              </button>
+              {i < arr.length - 1 && <ChevronRight className="size-3.5 text-muted-foreground/60" />}
+            </span>
+          ))}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => load(path)}
+          disabled={loading}
+          aria-label="Rafraîchir le dossier"
+        >
+          <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
