@@ -25,7 +25,10 @@ ENV PHOTOS_DIR=/photos
 # C.UTF-8 est un locale glibc intégré (pas besoin du paquet locales/locale-gen).
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
-COPY --from=builder /app/public ./public
+# Pas de dossier public/ (aucun asset statique dans cette app) — contrairement
+# à un copier-coller naïf du Dockerfile de scan-page, on ne copie pas un
+# dossier vide : git ne suit pas les dossiers vides, "public/" n'existe donc
+# pas dans l'image checkoutée en CI, et un COPY dessus échoue ("not found").
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
