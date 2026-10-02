@@ -97,6 +97,19 @@ export async function optimizeImage(params: OptimizeImageParams): Promise<Optimi
       break;
   }
 
+  // Un ré-encodage ne réduit pas TOUJOURS la taille (photo déjà bien
+  // compressée par le téléphone/l'appareil, qualité demandée supérieure à
+  // celle d'origine...) : si le résultat est plus gros ou égal, on garde le
+  // fichier d'origine intact plutôt que de dégrader ce qu'on est censé
+  // optimiser. Jamais de fichier "origin/" créé dans ce cas : rien n'a été
+  // remplacé, il n'y a rien à sauvegarder.
+  if (output.length >= originalSize) {
+    onProgress?.(
+      `déjà optimale (${originalSize} octets, le ré-encodage donnait ${output.length}) : fichier conservé tel quel`
+    );
+    return { originalSize, optimizedSize: originalSize };
+  }
+
   const optimizedSize = output.length;
   const tmpPath = `${filePath}.tmp`;
   fs.writeFileSync(tmpPath, output);

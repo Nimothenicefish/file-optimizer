@@ -129,6 +129,36 @@ describe("optimizeImage — conservation de l'original (keepOriginal: true)", ()
   });
 });
 
+describe("optimizeImage — ne dégrade jamais un fichier déjà bien compressé", () => {
+  it("garde le fichier original intact si le ré-encodage produirait un fichier plus gros", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "noise.jpg");
+    const width = 300;
+    const height = 300;
+    const channels = 3;
+    const raw = Buffer.alloc(width * height * channels);
+    for (let i = 0; i < raw.length; i++) raw[i] = Math.floor(Math.random() * 256);
+    // Du bruit (pas de zones plates) : la qualité JPEG influence vraiment la
+    // taille de sortie, contrairement à une image de test unie.
+    await sharp(raw, { raw: { width, height, channels } }).jpeg({ quality: 30 }).toFile(filePath);
+    const originalBytes = fs.readFileSync(filePath);
+
+    // Qualité demandée bien supérieure à celle d'origine, sans redimension
+    // (maxDimension largement au-dessus) : le ré-encodage produit forcément
+    // un fichier plus gros.
+    const result = await optimizeImage({
+      filePath,
+      maxDimension: 2000,
+      quality: 95,
+      keepOriginal: true,
+    });
+
+    expect(result.optimizedSize).toBe(result.originalSize);
+    expect(fs.readFileSync(filePath).equals(originalBytes)).toBe(true);
+    expect(fs.existsSync(path.join(dir, "origin", "noise.jpg"))).toBe(false);
+  });
+});
+
 describe("optimizeImage — tolère un JPEG légèrement corrompu", () => {
   it("n'échoue pas sur un simple avertissement libjpeg mineur", async () => {
     const dir = mkTempDir();
