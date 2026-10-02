@@ -1,6 +1,9 @@
 services:
   file-optimizer:
     # En dev : `docker compose up -d --build` (build local à partir du Dockerfile).
+    # Sur le NAS : `docker compose pull && docker compose up -d` (récupère l'image
+    # publiée par la CI GitHub Actions, pas besoin de builder sur le NAS).
+    image: ghcr.io/nimothenicefish/file-optimizer:latest
     build: .
     ports:
       - "3100:3000"
