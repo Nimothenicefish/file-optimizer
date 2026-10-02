@@ -1,5 +1,9 @@
 "use client";
 
+import { LogOut } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
 export function LogoutButton() {
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -10,11 +14,13 @@ export function LogoutButton() {
   }
 
   return (
-    <button
-      onClick={handleLogout}
-      className="text-sm text-zinc-600 hover:text-zinc-900"
-    >
-      Se déconnecter
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" onClick={handleLogout} aria-label="Se déconnecter">
+          <LogOut />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Se déconnecter</TooltipContent>
+    </Tooltip>
   );
 }

@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ChevronRight, File, Folder, Image as ImageIcon, ScanSearch, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type Entry = {
   name: string;
@@ -39,9 +45,7 @@ export default function BrowsePage() {
   const [keepOriginal, setKeepOriginal] = useState(true);
 
   const [scanning, setScanning] = useState(false);
-  const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [enqueuing, setEnqueuing] = useState(false);
-  const [enqueueMessage, setEnqueueMessage] = useState<string | null>(null);
 
   const load = useCallback(async (nextPath: string) => {
     setLoading(true);
@@ -81,7 +85,6 @@ export default function BrowsePage() {
 
   async function scanFolder() {
     setScanning(true);
-    setScanMessage(null);
     try {
       const res = await fetch("/api/scan", {
         method: "POST",
@@ -90,14 +93,12 @@ export default function BrowsePage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setScanMessage(data.error ?? "Échec du scan");
+        toast.error("Échec du scan", { description: data.error });
         return;
       }
       const parts = [`${data.found} photo(s) trouvée(s)`, `${data.queued} mise(s) en file`];
-      if (data.skippedAlreadyQueued > 0) {
-        parts.push(`${data.skippedAlreadyQueued} déjà en file`);
-      }
-      setScanMessage(parts.join(", "));
+      if (data.skippedAlreadyQueued > 0) parts.push(`${data.skippedAlreadyQueued} déjà en file`);
+      toast.success(parts.join(", "));
     } finally {
       setScanning(false);
     }
@@ -106,28 +107,20 @@ export default function BrowsePage() {
   async function optimizeSelection() {
     if (selected.size === 0) return;
     setEnqueuing(true);
-    setEnqueueMessage(null);
     try {
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paths: [...selected],
-          maxDimension,
-          quality,
-          keepOriginal,
-        }),
+        body: JSON.stringify({ paths: [...selected], maxDimension, quality, keepOriginal }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setEnqueueMessage(data.error ?? "Échec de la mise en file");
+        toast.error("Échec de la mise en file", { description: data.error });
         return;
       }
       const parts = [`${data.queued} mise(s) en file`];
-      if (data.skippedAlreadyQueued > 0) {
-        parts.push(`${data.skippedAlreadyQueued} déjà en file`);
-      }
-      setEnqueueMessage(parts.join(", "));
+      if (data.skippedAlreadyQueued > 0) parts.push(`${data.skippedAlreadyQueued} déjà en file`);
+      toast.success(parts.join(", "));
       setSelected(new Set());
     } finally {
       setEnqueuing(false);
@@ -135,109 +128,105 @@ export default function BrowsePage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5 py-6">
       <div>
-        <h2 className="text-lg font-semibold">Parcourir</h2>
-        <p className="text-sm text-zinc-500">
+        <h2 className="text-lg font-semibold tracking-tight">Parcourir</h2>
+        <p className="text-sm text-muted-foreground">
           Scanne un dossier entier (sous-dossiers compris) pour tout optimiser d&apos;un coup, ou
           sélectionne des photos précises en parcourant les dossiers.
         </p>
       </div>
 
-      <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4">
+      <div className="panel flex flex-col gap-3 p-4">
         <h3 className="text-sm font-medium">Réglages</h3>
-        <div className="flex flex-wrap items-center gap-4 text-sm">
-          <label className="flex items-center gap-2">
-            Taille max (côté le plus grand)
-            <input
-              type="number"
-              min={100}
-              max={20000}
-              value={maxDimension}
-              onChange={(e) => setMaxDimension(Number(e.target.value))}
-              className="w-24 rounded border border-zinc-300 px-2 py-1"
-            />
-            px
-          </label>
-          <label className="flex items-center gap-2">
-            Qualité (JPEG/WebP/AVIF)
-            <input
+        <div className="flex flex-wrap items-end gap-5">
+          <div className="space-y-1.5">
+            <Label htmlFor="maxDimension">Taille max (plus grand côté)</Label>
+            <div className="flex items-center gap-1.5">
+              <Input
+                id="maxDimension"
+                type="number"
+                min={100}
+                max={20000}
+                value={maxDimension}
+                onChange={(e) => setMaxDimension(Number(e.target.value))}
+                className="h-8 w-24"
+              />
+              <span className="text-sm text-muted-foreground">px</span>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="quality">Qualité (JPEG/WebP/AVIF)</Label>
+            <Input
+              id="quality"
               type="number"
               min={1}
               max={100}
               value={quality}
               onChange={(e) => setQuality(Number(e.target.value))}
-              className="w-20 rounded border border-zinc-300 px-2 py-1"
+              className="h-8 w-20"
             />
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={keepOriginal}
-              onChange={(e) => setKeepOriginal(e.target.checked)}
-            />
+          </div>
+          <Label className="flex items-center gap-2 pb-1.5">
+            <Checkbox checked={keepOriginal} onCheckedChange={(c) => setKeepOriginal(c === true)} />
             Conserver les originaux (dossier &quot;origin&quot;)
-          </label>
+          </Label>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm">
+      <div className="flex flex-wrap items-center gap-1 text-sm">
         {breadcrumbs(path).map((crumb, i, arr) => (
-          <span key={crumb.path} className="flex items-center gap-2">
+          <span key={crumb.path} className="flex items-center gap-1">
             <button
               onClick={() => setPath(crumb.path)}
-              className={i === arr.length - 1 ? "font-medium text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}
+              className={
+                i === arr.length - 1
+                  ? "rounded-md px-1.5 py-0.5 font-medium text-foreground"
+                  : "rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              }
             >
               {crumb.label}
             </button>
-            {i < arr.length - 1 && <span className="text-zinc-300">/</span>}
+            {i < arr.length - 1 && <ChevronRight className="size-3.5 text-muted-foreground/60" />}
           </span>
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          onClick={scanFolder}
-          disabled={scanning}
-          className="rounded bg-zinc-900 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
-        >
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={scanFolder} disabled={scanning} className="gap-1.5">
+          <ScanSearch className="size-4" />
           {scanning ? "Scan en cours…" : "Scanner ce dossier (récursif)"}
-        </button>
-        <button
-          onClick={selectAllImagesHere}
-          className="rounded border border-zinc-300 px-3 py-1.5 text-sm"
-        >
+        </Button>
+        <Button onClick={selectAllImagesHere} variant="outline">
           Sélectionner les photos de ce dossier
-        </button>
-        {scanMessage && <span className="text-sm text-zinc-600">{scanMessage}</span>}
+        </Button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+      <div className="panel overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-zinc-50 text-left text-zinc-500">
-            <tr>
-              <th className="px-4 py-2" />
-              <th className="px-4 py-2">Nom</th>
-              <th className="px-4 py-2">Taille</th>
+          <thead className="text-left text-muted-foreground">
+            <tr className="border-b">
+              <th className="w-10 px-4 py-2" />
+              <th className="px-4 py-2 font-medium">Nom</th>
+              <th className="px-4 py-2 font-medium">Taille</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-zinc-400">
+                <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">
                   Chargement…
                 </td>
               </tr>
             )}
             {!loading &&
               entries.map((entry) => (
-                <tr key={entry.path} className="border-t border-zinc-100">
+                <tr key={entry.path} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
                   <td className="px-4 py-2">
                     {entry.type === "image" && (
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selected.has(entry.path)}
-                        onChange={() => toggleSelect(entry.path)}
+                        onCheckedChange={() => toggleSelect(entry.path)}
                       />
                     )}
                   </td>
@@ -245,22 +234,30 @@ export default function BrowsePage() {
                     {entry.type === "directory" ? (
                       <button
                         onClick={() => setPath(entry.path)}
-                        className="text-zinc-900 underline"
+                        className="flex items-center gap-2 font-medium text-foreground hover:text-primary"
                       >
-                        📁 {entry.name}
+                        <Folder className="size-4 text-primary" />
+                        {entry.name}
                       </button>
                     ) : (
-                      <span className={entry.type === "other" ? "text-zinc-400" : ""}>
-                        {entry.type === "image" ? "🖼️" : "📄"} {entry.name}
+                      <span
+                        className={`flex items-center gap-2 ${entry.type === "other" ? "text-muted-foreground" : ""}`}
+                      >
+                        {entry.type === "image" ? (
+                          <ImageIcon className="size-4 text-muted-foreground" />
+                        ) : (
+                          <File className="size-4 text-muted-foreground" />
+                        )}
+                        {entry.name}
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-zinc-400">{formatSize(entry.size)}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{formatSize(entry.size)}</td>
                 </tr>
               ))}
             {!loading && entries.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-zinc-400">
+                <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">
                   Dossier vide.
                 </td>
               </tr>
@@ -270,22 +267,15 @@ export default function BrowsePage() {
       </div>
 
       {selected.size > 0 && (
-        <div className="sticky bottom-4 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-300 bg-white p-4 shadow-md">
+        <div className="panel sticky bottom-4 flex flex-wrap items-center gap-3 p-4">
           <span className="text-sm font-medium">{selected.size} photo(s) sélectionnée(s)</span>
-          <button
-            onClick={() => setSelected(new Set())}
-            className="rounded border border-zinc-300 px-3 py-1.5 text-sm"
-          >
+          <Button variant="outline" size="sm" onClick={() => setSelected(new Set())} className="gap-1.5">
+            <X className="size-4" />
             Vider la sélection
-          </button>
-          <button
-            onClick={optimizeSelection}
-            disabled={enqueuing}
-            className="rounded bg-zinc-900 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
-          >
+          </Button>
+          <Button onClick={optimizeSelection} disabled={enqueuing} className="ml-auto">
             {enqueuing ? "Mise en file…" : `Optimiser la sélection (${selected.size})`}
-          </button>
-          {enqueueMessage && <span className="text-sm text-zinc-600">{enqueueMessage}</span>}
+          </Button>
         </div>
       )}
     </div>

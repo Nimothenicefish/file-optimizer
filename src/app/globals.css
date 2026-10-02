@@ -1,49 +1,125 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-panel: var(--panel);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Thème clair fixe : l'UI n'a pas de variante dark, on n'active donc pas
-   prefers-color-scheme (sinon le texte devient clair sur fond clair). */
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Couleur dominante : jaune moutarde (H~88 en OKLCH) au lieu du violet —
+   mustard est clair (L~0.74-0.78), donc le texte PORTÉ PAR primary doit être
+   sombre (contrairement à un violet foncé qui marche avec du blanc). */
+:root {
+  --background: oklch(0.982 0.006 90);
+  --foreground: oklch(0.22 0.02 70);
+  --panel: oklch(1 0 0 / 72%);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.02 70);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.02 70);
+  --primary: oklch(0.74 0.15 88);
+  --primary-foreground: oklch(0.24 0.035 70);
+  --secondary: oklch(0.955 0.01 85);
+  --secondary-foreground: oklch(0.3 0.025 70);
+  --muted: oklch(0.955 0.008 85);
+  --muted-foreground: oklch(0.5 0.02 70);
+  --accent: oklch(0.94 0.04 88);
+  --accent-foreground: oklch(0.38 0.08 70);
+  --destructive: oklch(0.58 0.22 25);
+  --success: oklch(0.6 0.15 160);
+  --warning: oklch(0.72 0.18 50);
+  --border: oklch(0.9 0.012 85);
+  --input: oklch(0.89 0.014 85);
+  --ring: oklch(0.68 0.15 88);
+  --radius: 0.75rem;
+  --glow: oklch(0.82 0.12 88 / 16%);
+  --glow-2: oklch(0.76 0.1 50 / 10%);
 }
 
-input,
-select,
-textarea {
-  color: var(--foreground);
-  background-color: #ffffff;
+.dark {
+  --background: oklch(0.16 0.012 75);
+  --foreground: oklch(0.95 0.012 85);
+  --panel: oklch(0.21 0.016 75 / 70%);
+  --card: oklch(0.21 0.016 75);
+  --card-foreground: oklch(0.95 0.012 85);
+  --popover: oklch(0.21 0.018 75);
+  --popover-foreground: oklch(0.95 0.012 85);
+  --primary: oklch(0.78 0.15 90);
+  --primary-foreground: oklch(0.2 0.03 70);
+  --secondary: oklch(0.27 0.016 75);
+  --secondary-foreground: oklch(0.92 0.012 85);
+  --muted: oklch(0.26 0.014 75);
+  --muted-foreground: oklch(0.68 0.018 80);
+  --accent: oklch(0.32 0.055 85);
+  --accent-foreground: oklch(0.9 0.06 88);
+  --destructive: oklch(0.7 0.19 22);
+  --success: oklch(0.74 0.15 160);
+  --warning: oklch(0.78 0.17 55);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.78 0.15 90);
+  --glow: oklch(0.75 0.14 88 / 18%);
+  --glow-2: oklch(0.65 0.12 50 / 10%);
 }
 
-/* Les <button> n'ont pas cursor:pointer par défaut dans les navigateurs
-   (contrairement aux <a>) — sans ça, rien n'indique visuellement qu'ils
-   sont cliquables au survol. */
 @layer base {
-  button:not(:disabled),
-  [role="button"]:not([aria-disabled="true"]),
-  input[type="checkbox"]:not(:disabled),
-  input[type="radio"]:not(:disabled),
-  select:not(:disabled),
-  label {
-    cursor: pointer;
+  * {
+    @apply border-border outline-ring/50;
   }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
 
-  button:disabled,
-  input[type="checkbox"]:disabled,
-  input[type="radio"]:disabled,
-  select:disabled {
-    cursor: not-allowed;
-  }
+/* Lueur douce derrière toute l'app — donne aux panneaux translucides un fond
+   sur lequel se poser. */
+.app-backdrop {
+  background:
+    radial-gradient(60rem 30rem at 10% -10%, var(--glow), transparent 60%),
+    radial-gradient(50rem 30rem at 100% 0%, var(--glow-2), transparent 60%),
+    var(--background);
+}
+
+.panel {
+  @apply rounded-2xl border bg-panel shadow-[0_1px_2px_rgb(0_0_0/0.04),0_8px_24px_-12px_rgb(0_0_0/0.12)] backdrop-blur-xl;
+}
+
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
 }

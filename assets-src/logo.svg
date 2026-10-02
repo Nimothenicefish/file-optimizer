@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd659"/>
+      <stop offset="0.55" stop-color="#e8ab1a"/>
+      <stop offset="1" stop-color="#c2870c"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.28" cy="0.18" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff3d1"/>
+      <stop offset="1" stop-color="#ffe4a1"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dy="10" result="blur"/>
+      <feFlood flood-color="#6b4a06" flood-opacity="0.35"/>
+      <feComposite in2="blur" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g id="tile">
+    <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+    <rect width="512" height="512" rx="116" fill="url(#glow)"/>
+  </g>
+  <g id="art">
+    <!-- Photo arrière (plus petite = "optimisée"), légèrement pivotée -->
+    <rect x="208" y="196" width="168" height="124" rx="16" fill="#ffffff" fill-opacity="0.38" transform="rotate(9 292 258)"/>
+    <!-- Photo principale, au premier plan -->
+    <g filter="url(#shadow)">
+      <rect x="132" y="150" width="248" height="184" rx="20" fill="#ffffff"/>
+    </g>
+    <!-- Contenu de la photo : ciel, montagne, soleil -->
+    <g clip-path="url(#photoClip)">
+      <clipPath id="photoClip">
+        <rect x="148" y="166" width="216" height="130" rx="10"/>
+      </clipPath>
+      <rect x="148" y="166" width="216" height="130" fill="url(#sky)"/>
+      <circle cx="310" cy="202" r="20" fill="#f6c431"/>
+      <path d="M148 296 L224 214 L268 258 L300 228 L364 296 Z" fill="#c2870c"/>
+      <path d="M148 296 L200 236 L236 270 L268 240 L364 296 Z" fill="#e8ab1a"/>
+    </g>
+    <!-- Flèches de compression : convergent vers le centre (taille réduite) -->
+    <g stroke="#6b4a06" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <!-- pointe en haut-gauche (vers le centre), queue en bas-droite -->
+      <path d="M344 316 L380 352 M344 316 H368 M344 316 V340"/>
+      <!-- pointe en haut-droite (vers le centre), queue en bas-gauche -->
+      <path d="M304 316 L268 352 M304 316 H280 M304 316 V340"/>
+    </g>
+  </g>
+</svg>

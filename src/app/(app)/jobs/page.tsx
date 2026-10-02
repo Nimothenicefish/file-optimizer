@@ -1,6 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Ban, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type Job = {
   id: string;
@@ -19,17 +31,17 @@ type Job = {
 const STATUS_LABEL: Record<string, string> = {
   pending: "en attente",
   running: "en cours",
-  done: "terminé ✅",
-  error: "erreur ❌",
+  done: "terminé",
+  error: "erreur",
   cancelled: "annulé",
 };
 
-const STATUS_BADGE: Record<string, string> = {
-  pending: "bg-zinc-100 text-zinc-600",
-  running: "bg-blue-100 text-blue-700",
-  done: "bg-green-100 text-green-700",
-  error: "bg-red-100 text-red-700",
-  cancelled: "bg-zinc-100 text-zinc-500",
+const STATUS_VARIANT: Record<string, "secondary" | "default" | "destructive" | "outline"> = {
+  pending: "secondary",
+  running: "default",
+  done: "outline",
+  error: "destructive",
+  cancelled: "secondary",
 };
 
 function formatSize(bytes: number | null): string {
@@ -55,7 +67,6 @@ export default function JobsPage() {
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [deletingPending, setDeletingPending] = useState(false);
   const [deletingDone, setDeletingDone] = useState(false);
   const [logJobId, setLogJobId] = useState<string | null>(null);
@@ -100,7 +111,7 @@ export default function JobsPage() {
         body: JSON.stringify({ ids }),
       });
       const data = await res.json();
-      setMessage(`${data.cancelled} job(s) annulé(s).`);
+      toast.success(`${data.cancelled} job(s) annulé(s)`);
       setSelected(new Set());
       await load();
     } finally {
@@ -113,7 +124,7 @@ export default function JobsPage() {
     try {
       const res = await fetch("/api/jobs/delete-pending", { method: "POST" });
       const data = await res.json();
-      setMessage(`${data.deleted} job(s) en attente supprimé(s).`);
+      toast.success(`${data.deleted} job(s) en attente supprimé(s)`);
       await load();
     } finally {
       setDeletingPending(false);
@@ -125,7 +136,7 @@ export default function JobsPage() {
     try {
       const res = await fetch("/api/jobs/delete-done", { method: "POST" });
       const data = await res.json();
-      setMessage(`${data.deleted} job(s) terminé(s) supprimé(s).`);
+      toast.success(`${data.deleted} job(s) terminé(s) supprimé(s)`);
       await load();
     } finally {
       setDeletingDone(false);
@@ -136,15 +147,15 @@ export default function JobsPage() {
   const logJob = jobs.find((j) => j.id === logJobId) ?? null;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5 py-6">
       <div>
-        <h2 className="text-lg font-semibold">Traitements</h2>
-        <p className="text-sm text-zinc-500">
+        <h2 className="text-lg font-semibold tracking-tight">Traitements</h2>
+        <p className="text-sm text-muted-foreground">
           Un job = une photo en cours d&apos;optimisation ou déjà traitée.
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-zinc-200 bg-white p-4 text-sm">
+      <div className="panel flex flex-wrap items-center gap-4 p-4 text-sm">
         {(["pending", "running", "done", "error", "cancelled"] as const).map((status) => (
           <button
             key={status}
@@ -152,8 +163,10 @@ export default function JobsPage() {
               setStatusFilter(status === statusFilter ? "" : status);
               setPage(1);
             }}
-            className={`flex items-center gap-1.5 ${
-              statusFilter === status ? "font-medium text-zinc-900 underline" : "text-zinc-500"
+            className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 ${
+              statusFilter === status
+                ? "bg-primary/15 font-medium text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
             {STATUS_LABEL[status]} : {statusCounts[status] ?? 0}
@@ -161,84 +174,71 @@ export default function JobsPage() {
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
           onClick={cancelSelected}
           disabled={busy || selected.size === 0}
-          className="rounded border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-40"
+          className="gap-1.5"
         >
+          <Ban className="size-4" />
           Annuler la sélection ({selected.size})
-        </button>
-        <button
-          onClick={deletePending}
-          disabled={deletingPending}
-          className="rounded border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-40"
-        >
-          {deletingPending ? "Suppression…" : "Supprimer tous les jobs en attente"}
-        </button>
-        <button
-          onClick={deleteDone}
-          disabled={deletingDone}
-          className="rounded border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-40"
-        >
-          {deletingDone ? "Suppression…" : "Supprimer tous les jobs terminés"}
-        </button>
-        {message && <span className="text-sm text-zinc-600">{message}</span>}
+        </Button>
+        <Button variant="outline" size="sm" onClick={deletePending} disabled={deletingPending} className="gap-1.5">
+          <Trash2 className="size-4" />
+          {deletingPending ? "Suppression…" : "Supprimer les jobs en attente"}
+        </Button>
+        <Button variant="outline" size="sm" onClick={deleteDone} disabled={deletingDone} className="gap-1.5">
+          <Trash2 className="size-4" />
+          {deletingDone ? "Suppression…" : "Supprimer les jobs terminés"}
+        </Button>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-zinc-50 text-left text-zinc-500">
-            <tr>
+          <thead className="text-left text-muted-foreground">
+            <tr className="border-b">
               <th className="px-4 py-2" />
-              <th className="px-4 py-2">Fichier</th>
-              <th className="px-4 py-2">Statut</th>
-              <th className="px-4 py-2">Avant</th>
-              <th className="px-4 py-2">Après</th>
-              <th className="px-4 py-2">Gain</th>
-              <th className="px-4 py-2">Créé le</th>
+              <th className="px-4 py-2 font-medium">Fichier</th>
+              <th className="px-4 py-2 font-medium">Statut</th>
+              <th className="px-4 py-2 font-medium">Avant</th>
+              <th className="px-4 py-2 font-medium">Après</th>
+              <th className="px-4 py-2 font-medium">Gain</th>
+              <th className="px-4 py-2 font-medium">Créé le</th>
               <th className="px-4 py-2" />
             </tr>
           </thead>
           <tbody>
             {jobs.map((job) => (
-              <tr key={job.id} className="border-t border-zinc-100">
+              <tr key={job.id} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
                 <td className="px-4 py-2">
                   {job.status === "pending" && (
-                    <input
-                      type="checkbox"
-                      checked={selected.has(job.id)}
-                      onChange={() => toggle(job.id)}
-                    />
+                    <Checkbox checked={selected.has(job.id)} onCheckedChange={() => toggle(job.id)} />
                   )}
                 </td>
-                <td className="px-4 py-2 font-mono text-xs text-zinc-700">{job.file_path}</td>
+                <td className="px-4 py-2 font-mono text-xs text-foreground">{job.file_path}</td>
                 <td className="px-4 py-2">
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_BADGE[job.status]}`}
-                  >
+                  <Badge variant={STATUS_VARIANT[job.status] ?? "secondary"}>
                     {STATUS_LABEL[job.status] ?? job.status}
-                  </span>
+                  </Badge>
                 </td>
-                <td className="px-4 py-2 text-zinc-500">{formatSize(job.original_size)}</td>
-                <td className="px-4 py-2 text-zinc-500">{formatSize(job.optimized_size)}</td>
-                <td className="px-4 py-2 text-zinc-500">
+                <td className="px-4 py-2 text-muted-foreground">{formatSize(job.original_size)}</td>
+                <td className="px-4 py-2 text-muted-foreground">{formatSize(job.optimized_size)}</td>
+                <td className="px-4 py-2 text-muted-foreground">
                   {formatGain(job.original_size, job.optimized_size)}
                 </td>
-                <td className="px-4 py-2 text-zinc-400">{job.created_at}</td>
+                <td className="px-4 py-2 text-muted-foreground">{job.created_at}</td>
                 <td className="px-4 py-2 text-right">
-                  <button
-                    onClick={() => setLogJobId(job.id)}
-                    className="rounded border border-zinc-300 px-2 py-1 text-xs"
-                  >
+                  <Button variant="outline" size="sm" onClick={() => setLogJobId(job.id)}>
                     Détails
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
             {jobs.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-zinc-400">
+                <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
                   Aucun job.
                 </td>
               </tr>
@@ -248,58 +248,44 @@ export default function JobsPage() {
       </div>
 
       <div className="flex items-center justify-between text-sm">
-        <span className="text-zinc-500">{total} job(s) au total</span>
+        <span className="text-muted-foreground">{total} job(s) au total</span>
         <div className="flex items-center gap-3">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="rounded border border-zinc-300 px-3 py-1.5 disabled:opacity-40"
           >
             ← Précédent
-          </button>
-          <span className="text-zinc-500">
+          </Button>
+          <span className="text-muted-foreground">
             Page {page} / {totalPages}
           </span>
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="rounded border border-zinc-300 px-3 py-1.5 disabled:opacity-40"
           >
             Suivant →
-          </button>
+          </Button>
         </div>
       </div>
 
-      {logJob && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
-          onClick={() => setLogJobId(null)}
-        >
-          <div
-            className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
-              <h3 className="text-sm font-semibold">{logJob.file_path}</h3>
-              <button
-                onClick={() => setLogJobId(null)}
-                className="rounded px-2 py-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="overflow-auto p-4">
-              <p className="mb-2 text-xs text-zinc-500">
-                Taille max : {logJob.max_dimension}px · Qualité : {logJob.quality} · Conserve
-                l&apos;original : {logJob.keep_original ? "oui" : "non"}
-              </p>
-              <pre className="whitespace-pre-wrap break-all text-xs text-zinc-700">
-                {logJob.log || "(vide)"}
-              </pre>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog open={logJob != null} onOpenChange={(open) => !open && setLogJobId(null)}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-hidden sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="truncate font-mono text-sm">{logJob?.file_path}</DialogTitle>
+            <DialogDescription>
+              Taille max : {logJob?.max_dimension}px · Qualité : {logJob?.quality} · Conserve
+              l&apos;original : {logJob?.keep_original ? "oui" : "non"}
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs text-foreground">
+            {logJob?.log || "(vide)"}
+          </pre>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,26 +1,31 @@
-import Link from "next/link";
+import Image from "next/image";
+import { ASSET_VERSION } from "@/lib/asset-version";
 import { LogoutButton } from "./LogoutButton";
+import { NavLinks } from "./NavLinks";
+import { ThemeToggle } from "./ThemeToggle";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
-      <header className="border-b border-zinc-200 bg-white">
-        <nav className="mx-auto flex max-w-5xl items-center gap-6 px-6 py-4">
-          <Link href="/" className="font-semibold">
-            Optimize files
-          </Link>
-          <Link href="/" className="text-sm text-zinc-600 hover:text-zinc-900">
-            Parcourir
-          </Link>
-          <Link href="/jobs" className="text-sm text-zinc-600 hover:text-zinc-900">
-            Traitements
-          </Link>
-          <span className="ml-auto flex items-center gap-4">
-            <LogoutButton />
-          </span>
-        </nav>
+    <div className="flex min-h-dvh flex-col">
+      <header className="flex h-14 shrink-0 items-center gap-3 px-4 lg:px-5">
+        <Image
+          src={`/logo.png?v=${ASSET_VERSION}`}
+          alt=""
+          width={30}
+          height={30}
+          className="rounded-[9px] shadow-md"
+          priority
+        />
+        <h1 className="text-[15px] font-semibold tracking-tight">File Optimizer</h1>
+        <div className="ml-4">
+          <NavLinks />
+        </div>
+        <div className="ml-auto flex items-center gap-0.5">
+          <ThemeToggle />
+          <LogoutButton />
+        </div>
       </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">{children}</main>
-    </>
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-8 lg:px-5">{children}</main>
+    </div>
   );
 }

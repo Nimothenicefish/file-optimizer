@@ -3,12 +3,25 @@ import { SESSION_COOKIE, authConfigured, isValidSessionToken } from "@/lib/auth"
 
 // Chemins accessibles sans session (en plus de /login lui-même, géré à part
 // ci-dessous car son comportement dépend de l'état d'authentification).
-const ALWAYS_PUBLIC = new Set(["/favicon.ico", "/icon.svg", "/apple-icon.png"]);
+const ALWAYS_PUBLIC = new Set([
+  "/favicon.ico",
+  "/icon.svg",
+  "/apple-icon.png",
+  "/apple-touch-icon.png",
+  "/logo.svg",
+  "/logo.png",
+  "/manifest.webmanifest",
+]);
+const ALWAYS_PUBLIC_PREFIXES = ["/icon-"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  if (pathname.startsWith("/api/auth/") || ALWAYS_PUBLIC.has(pathname)) {
+  if (
+    pathname.startsWith("/api/auth/") ||
+    ALWAYS_PUBLIC.has(pathname) ||
+    ALWAYS_PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))
+  ) {
     return NextResponse.next();
   }
 
