@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { DEFAULT_MAX_DIMENSION, DEFAULT_QUALITY } from "@/lib/imageLimits";
 import { InvalidPathError, resolvePhotoPath } from "@/lib/photoBrowse";
 import { enqueuePhotos } from "@/lib/queue/worker";
+import { isQueuePaused } from "@/lib/queueSettings";
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = Math.trunc(Number(value));
@@ -59,7 +60,7 @@ export async function GET(req: Request) {
   };
   for (const row of statusCountRows) statusCounts[row.status] = row.count;
 
-  return NextResponse.json({ jobs, total, page, pageSize, statusCounts });
+  return NextResponse.json({ jobs, total, page, pageSize, statusCounts, paused: isQueuePaused() });
 }
 
 // Met en file une sélection manuelle de fichiers (chemins relatifs à

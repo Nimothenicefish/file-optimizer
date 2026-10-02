@@ -43,6 +43,15 @@ function createDb() {
       last_failed_at TEXT
     );
 
+    -- Une seule ligne (id=1) : quand paused=1, le worker (voir tick() dans
+    -- src/lib/queue/worker.ts) ne démarre plus aucun NOUVEAU job, mais laisse
+    -- un job déjà "running" se terminer normalement — bouton pause/reprise
+    -- sur /jobs. Persisté en base : survit à un redémarrage du conteneur.
+    CREATE TABLE IF NOT EXISTS queue_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      paused INTEGER NOT NULL DEFAULT 0
+    );
+
     CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_jobs_file_path ON jobs(file_path);
   `);
@@ -52,6 +61,8 @@ function createDb() {
       "INSERT OR IGNORE INTO login_attempts (id, failed_count, last_failed_at) VALUES (1, 0, NULL)"
     )
     .run();
+
+  instance.prepare("INSERT OR IGNORE INTO queue_settings (id, paused) VALUES (1, 0)").run();
 
   return instance;
 }

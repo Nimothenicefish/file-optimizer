@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Ban, Trash2 } from "lucide-react";
+import { Ban, Pause, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,8 @@ export default function JobsPage() {
   const [deletingPending, setDeletingPending] = useState(false);
   const [deletingDone, setDeletingDone] = useState(false);
   const [logJobId, setLogJobId] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [togglingPause, setTogglingPause] = useState(false);
 
   async function load() {
     const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
@@ -67,6 +69,23 @@ export default function JobsPage() {
     setJobs(data.jobs ?? []);
     setTotal(data.total ?? 0);
     setStatusCounts(data.statusCounts ?? {});
+    setPaused(Boolean(data.paused));
+  }
+
+  async function togglePause() {
+    setTogglingPause(true);
+    try {
+      const res = await fetch("/api/queue-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: !paused }),
+      });
+      const data = await res.json();
+      setPaused(Boolean(data.paused));
+      toast.success(data.paused ? "Traitement mis en pause" : "Traitement repris");
+    } finally {
+      setTogglingPause(false);
+    }
   }
 
   useEffect(() => {
@@ -141,6 +160,25 @@ export default function JobsPage() {
         <p className="text-sm text-muted-foreground">
           Un job = une photo en cours d&apos;optimisation ou déjà traitée.
         </p>
+      </div>
+
+      <div className="panel flex flex-wrap items-center gap-3 p-4">
+        <Button
+          variant={paused ? "default" : "outline"}
+          size="sm"
+          onClick={togglePause}
+          disabled={togglingPause}
+          className="gap-1.5"
+        >
+          {paused ? <Play className="size-4" /> : <Pause className="size-4" />}
+          {togglingPause ? "…" : paused ? "Reprendre le traitement" : "Mettre en pause le traitement"}
+        </Button>
+        {paused && (
+          <span className="text-sm text-warning">
+            En pause — aucun nouveau job ne démarre
+            {(statusCounts.running ?? 0) > 0 ? ", le job en cours se termine encore." : "."}
+          </span>
+        )}
       </div>
 
       <div className="panel flex flex-wrap items-center gap-4 p-4 text-sm">

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { db } from "@/lib/db";
 import { optimizeImage } from "@/lib/pipeline/optimizeImage";
+import { isQueuePaused } from "@/lib/queueSettings";
 
 export { enqueuePhotos } from "@/lib/queue/jobs";
 
@@ -64,6 +65,9 @@ let running = false;
 
 async function tick() {
   if (running) return;
+  // Un job déjà "running" continue (rien ne l'interrompt) : la pause ne fait
+  // qu'empêcher d'en DÉMARRER un nouveau.
+  if (isQueuePaused()) return;
   const job = db
     .prepare("SELECT * FROM jobs WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1")
     .get() as JobRow | undefined;

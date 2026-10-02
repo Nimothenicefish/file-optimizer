@@ -9,6 +9,7 @@ let tmpDir: string;
 let photosDir: string;
 let db: typeof import("@/lib/db").db;
 let recoverInterruptedJobs: typeof import("@/lib/queue/worker").recoverInterruptedJobs;
+let setQueuePaused: typeof import("@/lib/queueSettings").setQueuePaused;
 
 beforeAll(async () => {
   const app = await setupTestApp("file-optimizer-worker-test-");
@@ -16,6 +17,7 @@ beforeAll(async () => {
   photosDir = app.photosDir;
   db = app.db;
   ({ recoverInterruptedJobs } = await import("@/lib/queue/worker"));
+  ({ setQueuePaused } = await import("@/lib/queueSettings"));
 });
 
 afterAll(() => {
@@ -69,6 +71,38 @@ describe("worker — traite un job 'pending' et le marque 'done'", () => {
       error: string;
     };
     expect(job.error).toContain("introuvable");
+  });
+});
+
+describe("pause de la file — aucun nouveau job ne démarre tant que paused=true", () => {
+  it("laisse un job 'pending' en attente pendant la pause, puis le traite à la reprise", async () => {
+    const jobId = randomUUID();
+    db.prepare(
+      `INSERT INTO jobs (id, file_path, status, max_dimension, quality, keep_original)
+       VALUES (?, ?, 'pending', 2000, 85, 1)`
+    ).run(jobId, path.join(photosDir, "paused.jpg"));
+
+    setQueuePaused(true);
+    try {
+      // Laisse largement le temps à plusieurs passages du worker (tick toutes
+      // les 1s) de tourner pendant que la file est en pause.
+      await new Promise((r) => setTimeout(r, 1500));
+      const row = db.prepare("SELECT status FROM jobs WHERE id = ?").get(jobId) as {
+        status: string;
+      };
+      expect(row.status).toBe("pending");
+    } finally {
+      setQueuePaused(false);
+    }
+
+    // Le fichier n'existe pas vraiment : le job finit en erreur, mais ça
+    // suffit à prouver que le worker l'a bien repris après la pause.
+    await waitFor(() => {
+      const row = db.prepare("SELECT status FROM jobs WHERE id = ?").get(jobId) as
+        | { status: string }
+        | undefined;
+      return row?.status === "error";
+    });
   });
 });
 

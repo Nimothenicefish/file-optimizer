@@ -11,6 +11,7 @@ let scanRoute: typeof import("@/app/api/scan/route");
 let jobsRoute: typeof import("@/app/api/jobs/route");
 let deletePendingRoute: typeof import("@/app/api/jobs/delete-pending/route");
 let cancelRoute: typeof import("@/app/api/jobs/cancel/route");
+let queueSettingsRoute: typeof import("@/app/api/queue-settings/route");
 
 beforeAll(async () => {
   const app = await setupTestApp("file-optimizer-scan-test-");
@@ -21,6 +22,7 @@ beforeAll(async () => {
   jobsRoute = await import("@/app/api/jobs/route");
   deletePendingRoute = await import("@/app/api/jobs/delete-pending/route");
   cancelRoute = await import("@/app/api/jobs/cancel/route");
+  queueSettingsRoute = await import("@/app/api/queue-settings/route");
 
   fs.mkdirSync(path.join(photosDir, "album", "sous-dossier"), { recursive: true });
   await sharp({ create: { width: 200, height: 200, channels: 3, background: { r: 1, g: 2, b: 3 } } })
@@ -95,6 +97,53 @@ describe("GET /api/jobs — recap par statut", () => {
     const data = await res.json();
     expect(data.jobs).toHaveLength(2);
     expect(new Set(data.jobs.map((j: { id: string }) => j.id))).toEqual(new Set(all.map((r) => r.id)));
+  });
+
+  it("expose l'état de pause de la file (false par défaut)", async () => {
+    const res = await jobsRoute.GET(new Request("http://localhost/api/jobs?pageSize=100"));
+    const data = await res.json();
+    expect(data.paused).toBe(false);
+  });
+});
+
+describe("GET/PATCH /api/queue-settings — pause de la file", () => {
+  it("renvoie paused=false par défaut, puis true après activation", async () => {
+    const before = await (await queueSettingsRoute.GET()).json();
+    expect(before.paused).toBe(false);
+
+    const patchRes = await queueSettingsRoute.PATCH(
+      new Request("http://localhost/api/queue-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: true }),
+      })
+    );
+    const patchData = await patchRes.json();
+    expect(patchData.paused).toBe(true);
+
+    const after = await (await queueSettingsRoute.GET()).json();
+    expect(after.paused).toBe(true);
+
+    // Remis à false pour ne pas bloquer le reste de la suite (worker partagé
+    // par tout ce fichier de test).
+    await queueSettingsRoute.PATCH(
+      new Request("http://localhost/api/queue-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: false }),
+      })
+    );
+  });
+
+  it("refuse un corps sans booléen paused", async () => {
+    const res = await queueSettingsRoute.PATCH(
+      new Request("http://localhost/api/queue-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: "yes" }),
+      })
+    );
+    expect(res.status).toBe(400);
   });
 });
 
