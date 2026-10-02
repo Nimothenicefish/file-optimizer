@@ -9,14 +9,16 @@ let InvalidPathError: typeof import("@/lib/photoBrowse").InvalidPathError;
 let resolvePhotoPath: typeof import("@/lib/photoBrowse").resolvePhotoPath;
 let listPhotoEntries: typeof import("@/lib/photoBrowse").listPhotoEntries;
 let listPhotosRecursive: typeof import("@/lib/photoBrowse").listPhotosRecursive;
+let imageContentType: typeof import("@/lib/photoBrowse").imageContentType;
+let fileRoute: typeof import("@/app/api/file/route");
 
 beforeAll(async () => {
   const app = await setupTestApp("file-optimizer-browse-test-");
   tmpDir = app.tmpDir;
   photosDir = app.photosDir;
-  ({ InvalidPathError, resolvePhotoPath, listPhotoEntries, listPhotosRecursive } = await import(
-    "@/lib/photoBrowse"
-  ));
+  ({ InvalidPathError, resolvePhotoPath, listPhotoEntries, listPhotosRecursive, imageContentType } =
+    await import("@/lib/photoBrowse"));
+  fileRoute = await import("@/app/api/file/route");
 
   fs.mkdirSync(path.join(photosDir, "vacances", "jour1"), { recursive: true });
   fs.mkdirSync(path.join(photosDir, "vacances", "origin"), { recursive: true });
@@ -75,5 +77,49 @@ describe("listPhotosRecursive — descend dans les sous-dossiers, ignore origin/
         path.join(photosDir, "vacances", "photo1.jpg"),
       ].sort()
     );
+  });
+});
+
+describe("imageContentType — type MIME d'après l'extension", () => {
+  it("reconnaît les formats pris en charge", () => {
+    expect(imageContentType("photo.jpg")).toBe("image/jpeg");
+    expect(imageContentType("photo.PNG")).toBe("image/png");
+    expect(imageContentType("photo.webp")).toBe("image/webp");
+  });
+
+  it("renvoie null pour un format non pris en charge", () => {
+    expect(imageContentType("notes.txt")).toBeNull();
+  });
+});
+
+describe("GET /api/file — sert le contenu brut d'une photo", () => {
+  it("sert une image avec le bon Content-Type", async () => {
+    const res = await fileRoute.GET(
+      new Request(`http://localhost/api/file?path=${encodeURIComponent("vacances/photo1.jpg")}`)
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/jpeg");
+    expect(await res.text()).toBe("a");
+  });
+
+  it("refuse un format non pris en charge (400), même s'il existe", async () => {
+    const res = await fileRoute.GET(
+      new Request(`http://localhost/api/file?path=${encodeURIComponent("vacances/notes.txt")}`)
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("refuse une tentative de traversée (400)", async () => {
+    const res = await fileRoute.GET(
+      new Request(`http://localhost/api/file?path=${encodeURIComponent("../../etc/photo.jpg")}`)
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("404 si le fichier n'existe pas", async () => {
+    const res = await fileRoute.GET(
+      new Request(`http://localhost/api/file?path=${encodeURIComponent("vacances/absent.jpg")}`)
+    );
+    expect(res.status).toBe(404);
   });
 });

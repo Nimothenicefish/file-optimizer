@@ -11,6 +11,22 @@ export const IMAGE_EXT = new Set(["jpg", "jpeg", "png", "webp", "avif"]);
 
 export class InvalidPathError extends Error {}
 
+const IMAGE_CONTENT_TYPE: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  avif: "image/avif",
+};
+
+// Type MIME pour un fichier listé comme "image" (voir IMAGE_EXT) — utilisé
+// pour servir son contenu brut (aperçu dans l'UI). Ne couvre que les formats
+// pris en charge : jamais appelé pour un fichier "other".
+export function imageContentType(fileName: string): string | null {
+  const ext = path.extname(fileName).slice(1).toLowerCase();
+  return IMAGE_CONTENT_TYPE[ext] ?? null;
+}
+
 // Résout un chemin relatif (fourni par le client) sous FILES_DIR, en
 // empêchant toute sortie du dossier (../, chemin absolu, etc).
 export function resolvePhotoPath(relPath: string): string {

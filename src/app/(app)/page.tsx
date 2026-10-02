@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  ChevronLeft,
   ChevronRight,
+  Eye,
   File,
   Folder,
   Image as ImageIcon,
@@ -73,6 +75,28 @@ export default function BrowsePage() {
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
   const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
   const [summary, setSummary] = useState<BatchSummary | null>(null);
+
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const imageEntries = entries.filter((e) => e.type === "image");
+  const previewIndex = imageEntries.findIndex((e) => e.path === previewPath);
+  const previewEntry = previewIndex >= 0 ? imageEntries[previewIndex] : null;
+
+  function showPreviewAt(index: number) {
+    if (imageEntries.length === 0) return;
+    const next = (index + imageEntries.length) % imageEntries.length;
+    setPreviewPath(imageEntries[next].path);
+  }
+
+  useEffect(() => {
+    if (!previewEntry) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "ArrowLeft") showPreviewAt(previewIndex - 1);
+      else if (e.key === "ArrowRight") showPreviewAt(previewIndex + 1);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewIndex, previewEntry]);
 
   function startBatch(newIds: string[]) {
     if (newIds.length === 0) return;
@@ -273,12 +297,13 @@ export default function BrowsePage() {
               <th className="w-10 px-4 py-2" />
               <th className="px-4 py-2 font-medium">Nom</th>
               <th className="px-4 py-2 font-medium">Taille</th>
+              <th className="px-4 py-2" />
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">
+                <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">
                   Chargement…
                 </td>
               </tr>
@@ -317,11 +342,23 @@ export default function BrowsePage() {
                     )}
                   </td>
                   <td className="px-4 py-2 text-muted-foreground">{formatSize(entry.size)}</td>
+                  <td className="px-4 py-2 text-right">
+                    {entry.type === "image" && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => setPreviewPath(entry.path)}
+                        aria-label="Voir l'image"
+                      >
+                        <Eye className="size-4" />
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               ))}
             {!loading && entries.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">
+                <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">
                   Dossier vide.
                 </td>
               </tr>
@@ -389,6 +426,50 @@ export default function BrowsePage() {
                   </p>
                 )}
               </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={previewEntry != null} onOpenChange={(open) => !open && setPreviewPath(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="truncate pr-8">{previewEntry?.name}</DialogTitle>
+            <DialogDescription>
+              {formatSize(previewEntry?.size)}
+              {imageEntries.length > 1 ? ` · ${previewIndex + 1} / ${imageEntries.length}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {previewEntry && (
+            <div className="relative flex items-center justify-center">
+              {imageEntries.length > 1 && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="absolute left-2 top-1/2 -translate-y-1/2 bg-background/80"
+                  onClick={() => showPreviewAt(previewIndex - 1)}
+                  aria-label="Image précédente"
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
+              )}
+              {/* eslint-disable-next-line @next/next/no-img-element -- source dynamique sous FILES_DIR, pas un asset Next optimisable */}
+              <img
+                src={`/api/file?path=${encodeURIComponent(previewEntry.path)}`}
+                alt={previewEntry.name}
+                className="max-h-[70vh] w-auto rounded-lg object-contain"
+              />
+              {imageEntries.length > 1 && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 bg-background/80"
+                  onClick={() => showPreviewAt(previewIndex + 1)}
+                  aria-label="Image suivante"
+                >
+                  <ChevronRight className="size-4" />
+                </Button>
+              )}
             </div>
           )}
         </DialogContent>
