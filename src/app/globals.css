@@ -104,6 +104,16 @@
   html {
     @apply font-sans;
   }
+  /* Les navigateurs ne mettent PAS cursor:pointer par défaut sur <button>
+     (contrairement à <a href>) — sans cette règle, les boutons natifs (ligne
+     de dossier pour y entrer, fil d'Ariane, pagination...) affichent le
+     curseur flèche normal malgré l'affordance cliquable. */
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
 }
 
 /* Lueur douce derrière toute l'app — donne aux panneaux translucides un fond
