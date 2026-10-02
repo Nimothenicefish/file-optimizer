@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Thème clair fixe : l'UI n'a pas de variante dark, on n'active donc pas
+   prefers-color-scheme (sinon le texte devient clair sur fond clair). */
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+input,
+select,
+textarea {
+  color: var(--foreground);
+  background-color: #ffffff;
+}
+
+/* Les <button> n'ont pas cursor:pointer par défaut dans les navigateurs
+   (contrairement aux <a>) — sans ça, rien n'indique visuellement qu'ils
+   sont cliquables au survol. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  select:not(:disabled),
+  label {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  input[type="checkbox"]:disabled,
+  input[type="radio"]:disabled,
+  select:disabled {
+    cursor: not-allowed;
+  }
+}

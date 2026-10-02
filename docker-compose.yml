@@ -1,0 +1,44 @@
+services:
+  file-optimizer:
+    # En dev : `docker compose up -d --build` (build local à partir du Dockerfile).
+    build: .
+    ports:
+      - "3100:3000"
+    volumes:
+      - ./data:/data
+      # Chemin hôte à adapter à ton NAS : la bibliothèque de photos à
+      # parcourir/optimiser, montée en lecture/écriture (l'app modifie les
+      # fichiers en place).
+      - /volume1/photos:/photos
+    environment:
+      - DATA_DIR=/data
+      - PHOTOS_DIR=/photos
+      - AUTH_USER=${AUTH_USER}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - AUTH_SECRET=${AUTH_SECRET:-}
+    restart: unless-stopped
+    # Limites dures (fonctionnent avec `docker compose up` sans Swarm,
+    # contrairement à deploy.resources.limits qui ne s'applique qu'en mode
+    # Swarm sur les versions de Docker Compose plus anciennes) — sans elles,
+    # un traitement d'image qui dérape (photo démesurée, bug) peut saturer
+    # TOUT le NAS (CPU et surtout RAM/swap) au lieu de rester contenu à ce
+    # conteneur. Avec ces limites, un dépassement fait juste redémarrer ce
+    # conteneur (voir "restart: unless-stopped" + la récupération automatique
+    # des jobs interrompus au démarrage) plutôt que de rendre le NAS injoignable.
+    #
+    # Valeurs reprises telles quelles de scan-page (même pipeline sharp, même
+    # shrink-on-load, mêmes conclusions mesurées sur un NAS similaire — voir
+    # son docker-compose.yml) comme point de départ raisonnable : à ajuster
+    # après avoir observé l'usage réel de CETTE app (`docker stats`).
+    mem_limit: 2g
+    memswap_limit: 2g
+    # "cpus" (quota CFS, NanoCPUs) échoue sur certains DSM/NAS dont le noyau
+    # n'a pas CONFIG_CFS_BANDWIDTH ("NanoCPUs can not be set..."). cpuset
+    # utilise un contrôleur cgroup différent (bien plus universellement
+    # supporté) : épingle le conteneur sur un cœur précis plutôt que de lui
+    # donner un quota fractionnaire — garantit un cœur toujours libre pour
+    # DSM. Adapter le numéro de cœur si un autre conteneur l'utilise déjà.
+    cpuset: "0"
+    # Garde-fou supplémentaire (fork bomb, bug de sous-processus en boucle) —
+    # le worker ne traite qu'un job (une photo) à la fois.
+    pids_limit: 64
