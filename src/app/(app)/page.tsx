@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
+  CircleHelp,
   Eye,
   File,
   Film,
@@ -35,13 +36,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatSize } from "@/lib/format";
 import {
+  CRF_LEVELS,
   DEFAULT_VIDEO_CRF,
   DEFAULT_VIDEO_PRESET,
   DEFAULT_VIDEO_PROFILE,
   VIDEO_PRESETS,
   VIDEO_TARGET_RATIO,
+  describeCrf,
   type VideoPreset,
   type VideoProfile,
 } from "@/lib/videoSettings";
@@ -364,7 +368,43 @@ export default function BrowsePage() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="videoCrf">Qualité (CRF, plus bas = meilleur)</Label>
+              <div className="flex items-center gap-1">
+                <Label htmlFor="videoCrf">Qualité (CRF, plus bas = meilleur)</Label>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground"
+                      aria-label="À quoi correspond le CRF ?"
+                    >
+                      <CircleHelp className="size-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="block max-w-sm space-y-2 p-3">
+                    <p>
+                      Le CRF fixe la qualité visée, pas la taille : x265 donne à chaque scène le
+                      débit nécessaire pour atteindre cette qualité. Plus il est bas, plus
+                      l&apos;image est fidèle et plus le fichier est gros. Repère : +6 ≈ fichier ~2×
+                      plus petit.
+                    </p>
+                    <ul className="space-y-1">
+                      {CRF_LEVELS.map((level, i) => (
+                        <li key={level.max}>
+                          <span className="font-semibold">
+                            {i === 0 ? `≤ ${level.max}` : `${CRF_LEVELS[i - 1].max + 1}–${level.max}`}{" "}
+                            · {level.label}
+                          </span>{" "}
+                          : {level.detail}
+                        </li>
+                      ))}
+                    </ul>
+                    <p>
+                      Le plafond de taille du type de vidéo s&apos;applique toujours en plus : un CRF
+                      bas ne fait jamais dépasser la taille maximale visée.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
               <Input
                 id="videoCrf"
                 type="number"
@@ -398,6 +438,12 @@ export default function BrowsePage() {
               Conserver la source (renommée en .mkv.bkp)
             </Label>
           </div>
+          <p className="text-xs">
+            <span className="font-medium text-primary">
+              CRF {videoCrf} · {describeCrf(videoCrf).label}
+            </span>{" "}
+            <span className="text-muted-foreground">: {describeCrf(videoCrf).detail}.</span>
+          </p>
           <p className="text-xs text-muted-foreground">
             Seule la piste vidéo est ré-encodée en x265 : toutes les pistes audio, sous-titres,
             chapitres et polices sont recopiés à l&apos;identique, avec leurs horodatages d&apos;origine

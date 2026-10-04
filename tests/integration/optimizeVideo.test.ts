@@ -11,6 +11,8 @@ let optimizeVideo: typeof import("@/lib/pipeline/optimizeVideo").optimizeVideo;
 let computeVideoMaxrate: typeof import("@/lib/pipeline/optimizeVideo").computeVideoMaxrate;
 let verifyOutput: typeof import("@/lib/pipeline/optimizeVideo").verifyOutput;
 let videoTargetSize: typeof import("@/lib/videoSettings").videoTargetSize;
+let describeCrf: typeof import("@/lib/videoSettings").describeCrf;
+let DEFAULT_VIDEO_CRF: number;
 let scanRoute: typeof import("@/app/api/scan/route");
 let cancelRoute: typeof import("@/app/api/jobs/cancel/route");
 let recoverInterruptedJobs: typeof import("@/lib/queue/worker").recoverInterruptedJobs;
@@ -82,7 +84,7 @@ beforeAll(async () => {
     "@/lib/pipeline/optimizeVideo"
   ));
   ({ recoverInterruptedJobs } = await import("@/lib/queue/worker"));
-  ({ videoTargetSize } = await import("@/lib/videoSettings"));
+  ({ videoTargetSize, describeCrf, DEFAULT_VIDEO_CRF } = await import("@/lib/videoSettings"));
   scanRoute = await import("@/app/api/scan/route");
   cancelRoute = await import("@/app/api/jobs/cancel/route");
   fixtureDir = path.join(tmpDir, "fixtures");
@@ -232,6 +234,21 @@ describe("optimizeVideo — annulation en plein encodage", () => {
     expect(ffmpegProcessesWriting(`${filePath}.part`)).toBe(0);
     expect(fs.existsSync(`${filePath}.part`)).toBe(false);
     expect(fs.readFileSync(filePath).equals(before)).toBe(true);
+  });
+});
+
+describe("describeCrf — aide de l'UI sur l'effet d'une valeur de CRF", () => {
+  it("classe chaque valeur dans la bonne tranche, bornes comprises", () => {
+    expect(describeCrf(0).label).toBe("Quasi sans perte");
+    expect(describeCrf(17).label).toBe("Quasi sans perte");
+    expect(describeCrf(18).label).toBe("Excellente");
+    expect(describeCrf(24).label).toBe("Très bonne (recommandé)");
+    expect(describeCrf(25).label).toBe("Bonne");
+    expect(describeCrf(51).label).toBe("Moyenne à faible");
+  });
+
+  it("présente la valeur par défaut comme recommandée", () => {
+    expect(describeCrf(DEFAULT_VIDEO_CRF).label).toContain("recommandé");
   });
 });
 

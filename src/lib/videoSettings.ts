@@ -10,6 +10,44 @@ export const VIDEO_EXT = new Set(["mkv"]);
 // typiquement la taille d'un H.264 par ~2. Éditable par job dans l'UI.
 export const DEFAULT_VIDEO_CRF = 22;
 
+// Effet attendu d'une valeur de CRF x265, du meilleur au moins bon — pour
+// l'aide de l'UI. Repère : +6 de CRF ≈ fichier ~2x plus petit (et -6 ≈ ~2x
+// plus gros), à vidéo égale. Le plafond de taille (voir videoTargetSize)
+// s'applique toujours en plus : un CRF bas ne fait jamais dépasser la cible.
+export type CrfLevel = { max: number; label: string; detail: string };
+
+export const CRF_LEVELS: CrfLevel[] = [
+  {
+    max: 17,
+    label: "Quasi sans perte",
+    detail: "indiscernable de la source, mais fichier gros : peu ou pas de place gagnée",
+  },
+  {
+    max: 20,
+    label: "Excellente",
+    detail: "pour les films auxquels tu tiens le plus ; gain de place modéré",
+  },
+  {
+    max: 24,
+    label: "Très bonne (recommandé)",
+    detail: "différence invisible en lecture normale, bon gain de place",
+  },
+  {
+    max: 28,
+    label: "Bonne",
+    detail: "léger flou possible sur les détails fins et les scènes sombres ; fichier nettement plus petit",
+  },
+  {
+    max: 51,
+    label: "Moyenne à faible",
+    detail: "défauts visibles (blocs, aplats) ; à réserver aux vidéos sans importance",
+  },
+];
+
+export function describeCrf(crf: number): CrfLevel {
+  return CRF_LEVELS.find((level) => crf <= level.max) ?? CRF_LEVELS[CRF_LEVELS.length - 1];
+}
+
 // Compromis vitesse d'encodage / taux de compression x265. Plus lent =
 // fichier plus petit à qualité égale, mais un film peut prendre des heures
 // sur un NAS (CPU faible, cœur unique épinglé — voir docker-compose.yml).
