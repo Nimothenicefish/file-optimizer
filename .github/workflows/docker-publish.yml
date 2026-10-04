@@ -17,21 +17,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Installer les dépendances npm
-        run: npm ci
-
       # Retour rapide en cas d'échec, avant de lancer le build Docker (qui
       # relance de toute façon les mêmes tests via le script "prebuild" —
       # voir package.json — donc aucun risque de publier une image dont les
       # tests ne passent pas, même si cette étape était retirée).
+      # Dans la même base que l'image (voir Dockerfile) plutôt que sur le
+      # runner Ubuntu : les tests vidéo dépendent de la version exacte
+      # d'ffmpeg (horodatages des pistes copiées), absente ou différente sur
+      # le runner.
       - name: Lancer les tests
-        run: npm test
+        run: |
+          docker run --rm -v "$PWD":/app -w /app node:22-trixie-slim sh -c '
+            apt-get update -qq &&
+            apt-get install -y -qq --no-install-recommends ffmpeg python3 make g++ >/dev/null &&
+            npm ci &&
+            npm test'
 
       - name: Lowercase image name
         id: image
