@@ -1,15 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { DEFAULT_MAX_DIMENSION, DEFAULT_QUALITY } from "@/lib/imageLimits";
-import { InvalidPathError, resolvePhotoPath } from "@/lib/photoBrowse";
-import { enqueuePhotos } from "@/lib/queue/worker";
+import { parseOptimizeSettings, toEnqueueParams } from "@/lib/optimizeSettings";
+import { InvalidPathError, mediaKind, resolvePhotoPath } from "@/lib/photoBrowse";
+import { enqueueFiles } from "@/lib/queue/worker";
 import { isQueuePaused } from "@/lib/queueSettings";
-
-function clampInt(value: unknown, fallback: number, min: number, max: number): number {
-  const n = Math.trunc(Number(value));
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -64,7 +58,9 @@ export async function GET(req: Request) {
 }
 
 // Met en file une sélection manuelle de fichiers (chemins relatifs à
-// FILES_DIR, choisis en parcourant les dossiers côté UI).
+// FILES_DIR, choisis en parcourant les dossiers côté UI). Photo ou vidéo
+// d'après l'extension de chaque fichier ; un format non pris en charge est
+// ignoré.
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const relPaths: string[] = Array.isArray(body?.paths) ? body.paths : [];
@@ -72,10 +68,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Aucun fichier sélectionné" }, { status: 400 });
   }
 
-  const maxDimension = clampInt(body?.maxDimension, DEFAULT_MAX_DIMENSION, 100, 20000);
-  const quality = clampInt(body?.quality, DEFAULT_QUALITY, 1, 100);
-  const keepOriginal = body?.keepOriginal !== false;
-  const forceJpeg = body?.forceJpeg === true;
+  const settings = parseOptimizeSettings(body);
 
   let filePaths: string[];
   try {
@@ -87,8 +80,11 @@ export async function POST(req: Request) {
     throw err;
   }
 
-  const { queued, skippedAlreadyQueued, ids } = enqueuePhotos(
-    filePaths.map((filePath) => ({ filePath, maxDimension, quality, keepOriginal, forceJpeg }))
+  const { queued, skippedAlreadyQueued, ids } = enqueueFiles(
+    filePaths.flatMap((filePath) => {
+      const kind = mediaKind(filePath);
+      return kind ? [toEnqueueParams(filePath, kind, settings)] : [];
+    })
   );
 
   return NextResponse.json({ queued, skippedAlreadyQueued, ids });

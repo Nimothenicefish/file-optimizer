@@ -11,6 +11,10 @@ export type OptimizeImageParams = {
   keepOriginal: boolean;
   forceJpeg?: boolean;
   onProgress?: (message: string) => void;
+  // Annulation : vérifiée avant toute écriture — le décodage/encodage sharp
+  // lui-même (quelques secondes) n'est pas interruptible, mais la photo
+  // n'est alors jamais touchée.
+  signal?: AbortSignal;
 };
 
 export type OptimizeImageResult = {
@@ -76,7 +80,8 @@ function moveToOriginFolder(filePath: string): void {
 // dans certains cas un gain de place (compression à perte plus agressive
 // qu'un PNG recompressé sans perte), au prix de la transparence éventuelle.
 export async function optimizeImage(params: OptimizeImageParams): Promise<OptimizeImageResult> {
-  const { filePath, maxDimension, quality, keepOriginal, forceJpeg = false, onProgress } = params;
+  const { filePath, maxDimension, quality, keepOriginal, forceJpeg = false, onProgress, signal } =
+    params;
 
   const originalBuffer = fs.readFileSync(filePath);
   const originalSize = originalBuffer.length;
@@ -141,6 +146,8 @@ export async function optimizeImage(params: OptimizeImageParams): Promise<Optimi
       break;
     }
   }
+
+  signal?.throwIfAborted();
 
   // Un ré-encodage ne réduit pas TOUJOURS la taille (photo déjà bien
   // compressée par le téléphone/l'appareil, qualité demandée supérieure à

@@ -1,14 +1,18 @@
 # file-optimizer
 
 App web self-hébergée pour optimiser en masse des photos (redimensionnement +
-compression), avec conservation optionnelle des originaux. Même principe que
+compression) et des vidéos MKV (ré-encodage x265), avec conservation
+optionnelle des originaux. Même principe que
 [scan-page](../scan-page) : Next.js, SQLite (file de jobs persistée),
 authentification par session, Docker.
 
 ## Fonctionnement
 
 - **Parcourir** (`/`) : navigue dans la bibliothèque montée en volume
-  (`FILES_DIR`), dossier par dossier.
+  (`FILES_DIR`), dossier par dossier, en mode **Photos** ou **Vidéos MKV**
+  (le mode choisit ce qui est sélectionnable/scanné : jamais les deux à la
+  fois, pour qu'un scan de photos n'embarque pas un encodage vidéo de
+  plusieurs heures).
   - **Scanner ce dossier (récursif)** : trouve toutes les photos sous le
     dossier courant (sous-dossiers compris) et les met en file d'un coup.
   - **Sélection manuelle** : coche des photos précises en parcourant les
@@ -18,10 +22,16 @@ authentification par session, Docker.
     qualité (JPEG/WebP/AVIF ; un PNG est toujours recompressé sans perte,
     indépendamment de ce réglage), conservation des originaux, conversion
     forcée en JPG (désactivée par défaut).
-- **Traitements** (`/jobs`) : liste des jobs (un job = une photo), filtrable
+- **Traitements** (`/jobs`) : liste des jobs (un job = un fichier, avec
+  l'avancement en % pendant l'encodage d'une vidéo), filtrable
   par statut, avec détails (log, taille avant/après) et actions groupées
-  (annuler les jobs en attente sélectionnés, supprimer tous les jobs en
+  (annuler les jobs sélectionnés, supprimer tous les jobs en
   attente/terminés).
+  - **Annuler** un job en attente le retire de la file ; annuler le job **en
+    cours** l'interrompt dans la seconde (vidéo : ffmpeg arrêté, fichier
+    temporaire supprimé ; photo : abandon juste avant l'écriture). Le fichier
+    d'origine reste toujours intact : il n'est remplacé qu'à la toute fin,
+    une fois le résultat prêt et vérifié.
 
 ### Formats pris en charge
 
@@ -61,6 +71,52 @@ dossier** que la photo (ex: `vacances/photo.jpg` → original déplacé vers
 `vacances/photo.jpg`). Un dossier `origin/` n'est jamais lui-même
 parcouru/scanné : ses fichiers ne sont jamais ré-optimisés par erreur.
 
+### Vidéos MKV (x265)
+
+Seule la piste vidéo est ré-encodée en x265/HEVC ; **toutes** les autres
+pistes (audio multiples, sous-titres de tout type, polices ASS en pièces
+jointes, chapitres, langues, drapeaux "par défaut"/"forcé") sont recopiées
+telles quelles, sans ré-encodage. `-copyts` conserve l'horodatage d'origine
+de chaque paquet : aucun décalage audio/sous-titres, même quand la source en
+contient un volontaire (sans lui, ffmpeg recale la vidéo ré-encodée et les
+pistes copiées différemment de quelques ms dès que la source ne démarre pas
+pile à 0).
+
+- **Vérification avant remplacement** : après l'encodage, le résultat est
+  comparé à la source (même pistes dans le même ordre, mêmes codecs pour les
+  pistes copiées, même nombre de paquets, même horodatage du premier paquet
+  de chaque piste, même durée). Au moindre écart, le résultat est jeté et la
+  source reste intacte (job en erreur, détail dans le log).
+- **Taille** : le CRF (22 par défaut) décide de la qualité ; le débit vidéo
+  est en plus plafonné pour que le fichier final ne dépasse pas une taille
+  maximale, selon le **type de vidéo** choisi :
+  - **Film** : 70 % de la source (4 Go → 2,8 Go max, souvent bien moins) ;
+  - **Série (épisodes)** : 200 Mo + 12 Mo par minute (~440 Mo pour un
+    épisode de 20 min, ~800 Mo pour 50 min), et jamais plus de 70 % de la
+    source.
+
+  En dessous du plafond, tant mieux. Seule exception :
+  pistes audio copiées si lourdes (TrueHD...) que la cible est inatteignable
+  sans dégrader franchement l'image — signalé dans le log. Le garde-fou
+  "jamais plus gros qu'avant" s'applique aussi.
+- **Déjà en HEVC/AV1/VP9** : fichier laissé intact (rien à gagner, perte de
+  qualité assurée) — ce qui évite aussi de ré-encoder un MKV déjà traité.
+- **Conserver la source** (désactivé par défaut) : la source est renommée en
+  `film.mkv.bkp` à côté du résultat (`film_1.mkv.bkp` si une sauvegarde
+  existe déjà). Sans cette option, la source est remplacée définitivement.
+- Encodage dans `film.mkv.part` (même dossier, renommé atomiquement à la
+  fin) ; espace disque vérifié avant de commencer, en gardant toujours au
+  moins 2 Go libres sur le volume. Un encodage coupé par un
+  redémarrage du conteneur supprime ce fichier temporaire au démarrage
+  suivant. Ni `.bkp` ni `.part` ne sont jamais listés comme vidéos.
+- **Ménager le NAS** : ffmpeg/ffprobe tournent en priorité CPU minimale
+  (`nice 19`) et en classe d'E/S disque "idle" (`ionice -c 3`), en plus des
+  limites dures du conteneur (RAM, cœur épinglé, nombre de process — voir
+  docker-compose.yml). La vitesse passe après la stabilité : plusieurs
+  heures par film sur un seul cœur ; le preset `fast`/`faster` va plus vite
+  au prix d'un fichier un peu plus gros. Les métadonnées HDR10 statiques et
+  Dolby Vision ne sont pas garanties : éviter ce mode sur des sources HDR.
+
 ### Protection mémoire (shrink-on-load)
 
 Comme scan-page : demander le redimensionnement **dans le même pipeline**
@@ -71,6 +127,9 @@ corrompues) ne peut donc pas faire exploser la mémoire du conteneur ; voir
 `src/lib/pipeline/optimizeImage.ts`.
 
 ## Développement
+
+Nécessite `ffmpeg`/`ffprobe` avec libx265 dans le PATH (mode vidéo et tests ;
+déjà inclus dans l'image Docker).
 
 ```bash
 cp .env.example .env   # renseigner AUTH_USER/AUTH_PASSWORD

@@ -33,6 +33,10 @@ services:
     # shrink-on-load, mêmes conclusions mesurées sur un NAS similaire — voir
     # son docker-compose.yml) comme point de départ raisonnable : à ajuster
     # après avoir observé l'usage réel de CETTE app (`docker stats`).
+    #
+    # Vidéos (x265) : 2g suffit pour du 1080p ; une vidéo 4K peut demander
+    # davantage (le conteneur redémarre alors et le job passe en erreur, la
+    # source restant intacte) — monter à 3-4g si tu encodes de la 4K.
     mem_limit: 2g
     memswap_limit: 2g
     # "cpus" (quota CFS, NanoCPUs) échoue sur certains DSM/NAS dont le noyau
@@ -41,7 +45,12 @@ services:
     # supporté) : épingle le conteneur sur un cœur précis plutôt que de lui
     # donner un quota fractionnaire — garantit un cœur toujours libre pour
     # DSM. Adapter le numéro de cœur si un autre conteneur l'utilise déjà.
+    # Vidéos : x265 sur un seul cœur compte plusieurs heures par film (en
+    # priorité minimale, nice 19 / ionice idle). Choix volontaire : la
+    # stabilité du NAS passe avant la vitesse. Donner plusieurs cœurs (ex:
+    # "0-1") accélère l'encodage — x265 s'adapte automatiquement au nombre de
+    # cœurs de ce cpuset — mais en laisse moins à DSM.
     cpuset: "0"
     # Garde-fou supplémentaire (fork bomb, bug de sous-processus en boucle) —
-    # le worker ne traite qu'un job (une photo) à la fois.
+    # le worker ne traite qu'un job (une photo ou une vidéo) à la fois.
     pids_limit: 64

@@ -1,0 +1,72 @@
+// Formats vidéo pris en charge par le mode "Vidéos" (ré-encodage x265, voir
+// src/lib/pipeline/optimizeVideo.ts). Volontairement limité au MKV : c'est
+// le seul conteneur dont on garantit la conservation de TOUTES les pistes
+// (audio multiples, sous-titres de tout type, polices ASS en pièces jointes,
+// chapitres) telles quelles.
+export const VIDEO_EXT = new Set(["mkv"]);
+
+// Facteur de qualité constant x265 (0 = sans perte, 51 = le pire). 22 :
+// visuellement quasi transparent sur un film 1080p, tout en divisant
+// typiquement la taille d'un H.264 par ~2. Éditable par job dans l'UI.
+export const DEFAULT_VIDEO_CRF = 22;
+
+// Compromis vitesse d'encodage / taux de compression x265. Plus lent =
+// fichier plus petit à qualité égale, mais un film peut prendre des heures
+// sur un NAS (CPU faible, cœur unique épinglé — voir docker-compose.yml).
+export const VIDEO_PRESETS = ["faster", "fast", "medium", "slow"] as const;
+export type VideoPreset = (typeof VIDEO_PRESETS)[number];
+export const DEFAULT_VIDEO_PRESET: VideoPreset = "medium";
+
+export function isVideoPreset(value: unknown): value is VideoPreset {
+  return typeof value === "string" && (VIDEO_PRESETS as readonly string[]).includes(value);
+}
+
+// Taille cible MAXIMALE du résultat, en fraction de la source (ex: 4 Go ->
+// 2,8 Go au plus). Le CRF décide de la qualité ; ce plafond n'intervient que
+// si le CRF seul produirait un fichier plus gros (débit vidéo maximal borné,
+// voir computeVideoMaxrate) — en dessous, tant mieux.
+export const VIDEO_TARGET_RATIO = 0.7;
+
+// Profil de taille cible : "film" = VIDEO_TARGET_RATIO de la source ;
+// "series" = en plus, plafond absolu proportionnel à la durée de l'épisode
+// (un épisode n'a pas besoin du débit d'un film pour rester propre — anime
+// et sitcoms se compressent particulièrement bien en x265).
+export const VIDEO_PROFILES = ["film", "series"] as const;
+export type VideoProfile = (typeof VIDEO_PROFILES)[number];
+export const DEFAULT_VIDEO_PROFILE: VideoProfile = "film";
+
+export function isVideoProfile(value: unknown): value is VideoProfile {
+  return typeof value === "string" && (VIDEO_PROFILES as readonly string[]).includes(value);
+}
+
+// Plafond "series" : base + par minute — ~440 Mo pour 20 min (sitcom,
+// anime), ~800 Mo pour 50 min.
+const MB = 1024 * 1024;
+export const SERIES_BASE_BYTES = 200 * MB;
+export const SERIES_BYTES_PER_MINUTE = 12 * MB;
+
+// Taille maximale visée pour le résultat (octets) — jamais plus de
+// VIDEO_TARGET_RATIO de la source, quel que soit le profil.
+export function videoTargetSize(sourceSize: number, durationS: number, profile: VideoProfile): number {
+  const ratioCap = sourceSize * VIDEO_TARGET_RATIO;
+  if (profile === "film") return ratioCap;
+  const seriesCap = SERIES_BASE_BYTES + (SERIES_BYTES_PER_MINUTE * durationS) / 60;
+  return Math.min(ratioCap, seriesCap);
+}
+
+// Codecs vidéo déjà au moins aussi efficaces que x265 : les ré-encoder ne
+// ferait que perdre en qualité pour un gain de place négligeable (voire
+// nul). Un fichier dont toutes les pistes vidéo sont dans un de ces codecs
+// est laissé intact — c'est aussi ce qui évite de ré-encoder un MKV déjà
+// optimisé lors d'un précédent passage.
+export const VIDEO_SKIP_CODECS = new Set(["hevc", "av1", "vp9"]);
+
+// Extension ajoutée à la source quand l'utilisateur choisit de la conserver
+// (film.mkv -> film.mkv.bkp, à côté du résultat). Hors VIDEO_EXT : jamais
+// listée comme vidéo, donc jamais ré-encodée par un scan ultérieur.
+export const VIDEO_BACKUP_SUFFIX = ".bkp";
+
+// Fichier temporaire d'encodage (film.mkv.part), dans le même dossier que la
+// source (renommage atomique à la fin, même système de fichiers). Lui aussi
+// hors VIDEO_EXT : jamais pris pour une vidéo à optimiser pendant un encodage.
+export const VIDEO_PART_SUFFIX = ".part";

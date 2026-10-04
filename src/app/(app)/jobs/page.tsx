@@ -23,6 +23,12 @@ type Job = {
   quality: number;
   keep_original: number;
   force_jpeg: number;
+  kind: string;
+  video_crf: number | null;
+  video_preset: string | null;
+  video_profile: string | null;
+  progress: number | null;
+  cancel_requested: number;
   original_size: number | null;
   optimized_size: number | null;
   error: string | null;
@@ -106,10 +112,12 @@ export default function JobsPage() {
     });
   }
 
-  const pendingIds = jobs.filter((j) => j.status === "pending").map((j) => j.id);
+  // En attente (annulé immédiatement) ou en cours (interrompu par le worker
+  // dans la seconde, fichier d'origine laissé intact).
+  const isCancellable = (j: Job) => j.status === "pending" || j.status === "running";
+  const cancellableIds = jobs.filter(isCancellable).map((j) => j.id);
 
-  async function cancelSelected() {
-    const ids = [...selected].filter((id) => pendingIds.includes(id));
+  async function cancelJobs(ids: string[]) {
     if (ids.length === 0) return;
     setBusy(true);
     try {
@@ -119,12 +127,19 @@ export default function JobsPage() {
         body: JSON.stringify({ ids }),
       });
       const data = await res.json();
-      toast.success(`${data.cancelled} job(s) annulé(s)`);
-      setSelected(new Set());
+      const parts: string[] = [];
+      if (data.cancelled > 0) parts.push(`${data.cancelled} job(s) annulé(s)`);
+      if (data.cancelling > 0) parts.push(`${data.cancelling} job(s) en cours d'interruption`);
+      toast.success(parts.join(", ") || "Rien à annuler (job déjà terminé)");
+      setSelected((s) => new Set([...s].filter((id) => !ids.includes(id))));
       await load();
     } finally {
       setBusy(false);
     }
+  }
+
+  function cancelSelected() {
+    return cancelJobs([...selected].filter((id) => cancellableIds.includes(id)));
   }
 
   async function deletePending() {
@@ -159,7 +174,7 @@ export default function JobsPage() {
       <div>
         <h2 className="text-lg font-semibold tracking-tight">Traitements</h2>
         <p className="text-sm text-muted-foreground">
-          Un job = une photo en cours d&apos;optimisation ou déjà traitée.
+          Un job = une photo ou une vidéo en cours d&apos;optimisation ou déjà traitée.
         </p>
       </div>
 
@@ -240,14 +255,19 @@ export default function JobsPage() {
             {jobs.map((job) => (
               <tr key={job.id} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
                 <td className="px-4 py-2">
-                  {job.status === "pending" && (
+                  {isCancellable(job) && (
                     <Checkbox checked={selected.has(job.id)} onCheckedChange={() => toggle(job.id)} />
                   )}
                 </td>
                 <td className="px-4 py-2 font-mono text-xs text-foreground">{job.file_path}</td>
                 <td className="px-4 py-2">
                   <Badge variant={STATUS_VARIANT[job.status] ?? "secondary"}>
-                    {STATUS_LABEL[job.status] ?? job.status}
+                    {job.status === "running" && job.cancel_requested
+                      ? "annulation…"
+                      : STATUS_LABEL[job.status] ?? job.status}
+                    {job.status === "running" && !job.cancel_requested && job.progress != null
+                      ? ` ${Math.floor(job.progress)} %`
+                      : ""}
                   </Badge>
                 </td>
                 <td className="px-4 py-2 text-muted-foreground">{formatSize(job.original_size)}</td>
@@ -257,9 +277,23 @@ export default function JobsPage() {
                 </td>
                 <td className="px-4 py-2 text-muted-foreground">{job.created_at}</td>
                 <td className="px-4 py-2 text-right">
-                  <Button variant="outline" size="sm" onClick={() => setLogJobId(job.id)}>
-                    Détails
-                  </Button>
+                  <div className="flex justify-end gap-2">
+                    {job.status === "running" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => cancelJobs([job.id])}
+                        disabled={busy || job.cancel_requested === 1}
+                        className="gap-1.5"
+                      >
+                        <Ban className="size-4" />
+                        Annuler
+                      </Button>
+                    )}
+                    <Button variant="outline" size="sm" onClick={() => setLogJobId(job.id)}>
+                      Détails
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -304,9 +338,19 @@ export default function JobsPage() {
           <DialogHeader>
             <DialogTitle className="truncate font-mono text-sm">{logJob?.file_path}</DialogTitle>
             <DialogDescription>
-              Taille max : {logJob?.max_dimension}px · Qualité : {logJob?.quality} · Conserve
-              l&apos;original : {logJob?.keep_original ? "oui" : "non"} · Force JPG :{" "}
-              {logJob?.force_jpeg ? "oui" : "non"}
+              {logJob?.kind === "video" ? (
+                <>
+                  Vidéo x265 ({logJob.video_profile === "series" ? "série" : "film"}) · CRF :{" "}
+                  {logJob.video_crf} · Preset : {logJob.video_preset} · Conserve
+                  la source (.mkv.bkp) : {logJob.keep_original ? "oui" : "non"}
+                </>
+              ) : (
+                <>
+                  Taille max : {logJob?.max_dimension}px · Qualité : {logJob?.quality} · Conserve
+                  l&apos;original : {logJob?.keep_original ? "oui" : "non"} · Force JPG :{" "}
+                  {logJob?.force_jpeg ? "oui" : "non"}
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs text-foreground">

@@ -26,10 +26,12 @@ function createDb() {
   instance.pragma("journal_mode = WAL");
 
   instance.exec(`
-    -- Un job = une photo à optimiser. Les réglages (dimension/qualité/
-    -- conservation de l'original) sont stockés sur chaque job plutôt que
-    -- globalement : un lot lancé avec certains réglages reste traçable et
-    -- reproductible même si les réglages par défaut changent ensuite.
+    -- Un job = un fichier (photo ou vidéo, voir "kind") à optimiser. Les
+    -- réglages (dimension/qualité/conservation de l'original, CRF/preset/
+    -- profil pour une vidéo) sont stockés sur chaque job plutôt que globalement :
+    -- un lot lancé avec certains réglages reste traçable et reproductible
+    -- même si les réglages par défaut changent ensuite. Pour une vidéo,
+    -- keep_original = conserver la source renommée en .mkv.bkp.
     CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,
       file_path TEXT NOT NULL,
@@ -38,6 +40,16 @@ function createDb() {
       quality INTEGER NOT NULL,
       keep_original INTEGER NOT NULL DEFAULT 1,
       force_jpeg INTEGER NOT NULL DEFAULT 0,
+      kind TEXT NOT NULL DEFAULT 'image',
+      video_crf INTEGER,
+      video_preset TEXT,
+      video_profile TEXT,
+      -- Avancement (0-100) d'un encodage vidéo en cours ; NULL pour une photo.
+      progress REAL,
+      -- Annulation demandée pour un job "running" (voir cancelJobs dans
+      -- src/lib/queue/jobs.ts) : le worker la détecte pendant le traitement
+      -- et l'interrompt.
+      cancel_requested INTEGER NOT NULL DEFAULT 0,
       original_size INTEGER,
       optimized_size INTEGER,
       error TEXT,
@@ -69,6 +81,12 @@ function createDb() {
   `);
 
   ensureColumn(instance, "jobs", "force_jpeg", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(instance, "jobs", "kind", "TEXT NOT NULL DEFAULT 'image'");
+  ensureColumn(instance, "jobs", "video_crf", "INTEGER");
+  ensureColumn(instance, "jobs", "video_preset", "TEXT");
+  ensureColumn(instance, "jobs", "video_profile", "TEXT");
+  ensureColumn(instance, "jobs", "progress", "REAL");
+  ensureColumn(instance, "jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0");
 
   instance
     .prepare(

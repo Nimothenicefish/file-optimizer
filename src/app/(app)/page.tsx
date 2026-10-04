@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Eye,
   File,
+  Film,
   Folder,
   Image as ImageIcon,
   Loader2,
@@ -26,28 +27,91 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatSize } from "@/lib/format";
+import {
+  DEFAULT_VIDEO_CRF,
+  DEFAULT_VIDEO_PRESET,
+  DEFAULT_VIDEO_PROFILE,
+  VIDEO_PRESETS,
+  VIDEO_TARGET_RATIO,
+  type VideoPreset,
+  type VideoProfile,
+} from "@/lib/videoSettings";
+
+type Mode = "image" | "video";
 
 type Entry = {
   name: string;
   path: string;
-  type: "directory" | "image" | "other";
+  type: "directory" | "image" | "video" | "other";
   size?: number;
 };
 
+const MODE_NOUN: Record<Mode, string> = { image: "photo(s)", video: "vidéo(s)" };
+
+// Onglet actif bien visible (même accent que les filtres de statut sur
+// /jobs) : Radix pose data-state="active", que les styles "data-active:" par
+// défaut du composant ne ciblent pas.
+const MODE_TAB_CLASS =
+  "px-3 data-[state=active]:bg-primary/15 data-[state=active]:text-primary dark:data-[state=active]:text-primary";
+
+const PROFILE_LABEL: Record<VideoProfile, string> = { film: "Film", series: "Série (épisodes)" };
+
 type BatchJob = {
   id: string;
+  kind: string;
   status: string;
   original_size: number | null;
   optimized_size: number | null;
 };
 
 type BatchSummary = {
-  count: number;
+  images: number;
+  videos: number;
   errors: number;
+  cancelled: number;
   originalTotal: number;
   optimizedTotal: number;
 };
+
+// Lot en cours de suivi, mémorisé dans le navigateur : un encodage vidéo dure
+// des heures, la page a toutes les chances d'être quittée/rechargée entre-
+// temps — le suivi (et la modale de bilan) reprend au retour sur Parcourir.
+// Simple confort : sans stockage disponible, le suivi reste limité à la page.
+const BATCH_STORAGE_KEY = "file-optimizer:batch-ids";
+
+function loadStoredBatch(): string[] | null {
+  try {
+    const ids = JSON.parse(localStorage.getItem(BATCH_STORAGE_KEY) ?? "null");
+    return Array.isArray(ids) && ids.length > 0 ? ids : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeBatch(ids: string[] | null) {
+  try {
+    if (ids && ids.length > 0) localStorage.setItem(BATCH_STORAGE_KEY, JSON.stringify(ids));
+    else localStorage.removeItem(BATCH_STORAGE_KEY);
+  } catch {
+    // stockage indisponible (navigation privée...) : suivi non persistant
+  }
+}
+
+function summaryLabel(summary: BatchSummary): string {
+  const parts: string[] = [];
+  if (summary.images > 0) parts.push(`${summary.images} photo(s)`);
+  if (summary.videos > 0) parts.push(`${summary.videos} vidéo(s)`);
+  return `${parts.join(" et ") || "Aucun fichier"} traitée(s)`;
+}
 
 function breadcrumbs(path: string): Array<{ label: string; path: string }> {
   const parts = path ? path.split("/") : [];
@@ -70,6 +134,15 @@ export default function BrowsePage() {
   const [quality, setQuality] = useState(85);
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [forceJpeg, setForceJpeg] = useState(false);
+
+  // Mode "Photos" ou "Vidéos MKV" : détermine ce qui est sélectionnable/
+  // scanné et les réglages affichés — jamais les deux à la fois, pour qu'un
+  // scan de photos n'embarque pas un encodage vidéo de plusieurs heures.
+  const [mode, setMode] = useState<Mode>("image");
+  const [videoCrf, setVideoCrf] = useState(DEFAULT_VIDEO_CRF);
+  const [videoPreset, setVideoPreset] = useState<VideoPreset>(DEFAULT_VIDEO_PRESET);
+  const [videoProfile, setVideoProfile] = useState<VideoProfile>(DEFAULT_VIDEO_PROFILE);
+  const [keepVideoSource, setKeepVideoSource] = useState(false);
 
   const [scanning, setScanning] = useState(false);
   const [enqueuing, setEnqueuing] = useState(false);
@@ -106,6 +179,13 @@ export default function BrowsePage() {
   }
 
   useEffect(() => {
+    const stored = loadStoredBatch();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- lecture du stockage navigateur, indisponible au rendu serveur
+    if (stored) setBatchIds(stored);
+  }, []);
+
+  useEffect(() => {
+    storeBatch(batchIds);
     if (!batchIds || batchIds.length === 0) return;
     let cancelled = false;
 
@@ -115,11 +195,19 @@ export default function BrowsePage() {
       if (cancelled) return;
       const jobs: BatchJob[] = data.jobs ?? [];
       const terminal = jobs.filter((j) => j.status !== "pending" && j.status !== "running");
-      setBatchProgress({ done: terminal.length, total: batchIds!.length });
-      if (jobs.length === batchIds!.length && terminal.length === jobs.length) {
+      setBatchProgress({ done: terminal.length, total: jobs.length });
+      // Comparé aux jobs RETROUVÉS (pas aux ids demandés) : un job supprimé
+      // depuis /jobs entre-temps ne bloque pas le bilan indéfiniment.
+      if (terminal.length === jobs.length) {
+        if (jobs.length === 0) {
+          setBatchIds(null);
+          return;
+        }
         setSummary({
-          count: jobs.length,
-          errors: jobs.filter((j) => j.status === "error" || j.status === "cancelled").length,
+          images: jobs.filter((j) => j.kind !== "video").length,
+          videos: jobs.filter((j) => j.kind === "video").length,
+          errors: jobs.filter((j) => j.status === "error").length,
+          cancelled: jobs.filter((j) => j.status === "cancelled").length,
           originalTotal: jobs.reduce((sum, j) => sum + (j.original_size ?? 0), 0),
           optimizedTotal: jobs.reduce((sum, j) => sum + (j.optimized_size ?? 0), 0),
         });
@@ -161,15 +249,31 @@ export default function BrowsePage() {
     });
   }
 
-  function selectAllImagesHere() {
+  function selectAllHere() {
     setSelected((s) => {
       const next = new Set(s);
       for (const e of entries) {
-        if (e.type === "image") next.add(e.path);
+        if (e.type === mode) next.add(e.path);
       }
       return next;
     });
   }
+
+  function changeMode(nextMode: Mode) {
+    setMode(nextMode);
+    setSelected(new Set());
+  }
+
+  const settings = {
+    maxDimension,
+    quality,
+    keepOriginal,
+    forceJpeg,
+    videoCrf,
+    videoPreset,
+    videoProfile,
+    keepVideoSource,
+  };
 
   async function scanFolder() {
     setScanning(true);
@@ -177,14 +281,14 @@ export default function BrowsePage() {
       const res = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, maxDimension, quality, keepOriginal, forceJpeg }),
+        body: JSON.stringify({ path, mode, ...settings }),
       });
       const data = await res.json();
       if (!res.ok) {
         toast.error("Échec du scan", { description: data.error });
         return;
       }
-      const parts = [`${data.found} photo(s) trouvée(s)`, `${data.queued} mise(s) en file`];
+      const parts = [`${data.found} ${MODE_NOUN[mode]} trouvée(s)`, `${data.queued} mise(s) en file`];
       if (data.skippedAlreadyQueued > 0) parts.push(`${data.skippedAlreadyQueued} déjà en file`);
       toast.success(parts.join(", "));
       startBatch(data.ids ?? []);
@@ -200,13 +304,7 @@ export default function BrowsePage() {
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paths: [...selected],
-          maxDimension,
-          quality,
-          keepOriginal,
-          forceJpeg,
-        }),
+        body: JSON.stringify({ paths: [...selected], ...settings }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -229,57 +327,144 @@ export default function BrowsePage() {
         <h2 className="text-lg font-semibold tracking-tight">Parcourir</h2>
         <p className="text-sm text-muted-foreground">
           Scanne un dossier entier (sous-dossiers compris) pour tout optimiser d&apos;un coup, ou
-          sélectionne des photos précises en parcourant les dossiers.
+          sélectionne des fichiers précis en parcourant les dossiers.
         </p>
       </div>
 
-      <div className="panel flex flex-col gap-3 p-4">
-        <h3 className="text-sm font-medium">Réglages</h3>
-        <div className="flex flex-wrap items-end gap-5">
-          <div className="space-y-1.5">
-            <Label htmlFor="maxDimension">Taille max (plus grand côté)</Label>
-            <div className="flex items-center gap-1.5">
-              <Input
-                id="maxDimension"
-                type="number"
-                min={100}
-                max={20000}
-                value={maxDimension}
-                onChange={(e) => setMaxDimension(Number(e.target.value))}
-                className="h-8 w-24"
-              />
-              <span className="text-sm text-muted-foreground">px</span>
+      <Tabs value={mode} onValueChange={(v) => changeMode(v as Mode)}>
+        <TabsList>
+          <TabsTrigger value="image" className={MODE_TAB_CLASS}>
+            <ImageIcon />
+            Photos
+          </TabsTrigger>
+          <TabsTrigger value="video" className={MODE_TAB_CLASS}>
+            <Film />
+            Vidéos MKV
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {mode === "video" ? (
+        <div className="panel flex flex-col gap-3 p-4">
+          <h3 className="text-sm font-medium">Réglages vidéo (ré-encodage x265)</h3>
+          <div className="flex flex-wrap items-end gap-5">
+            <div className="space-y-1.5">
+              <Label>Type de vidéo</Label>
+              <Select value={videoProfile} onValueChange={(v) => setVideoProfile(v as VideoProfile)}>
+                <SelectTrigger className="w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(PROFILE_LABEL) as VideoProfile[]).map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {PROFILE_LABEL[p]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="videoCrf">Qualité (CRF, plus bas = meilleur)</Label>
+              <Input
+                id="videoCrf"
+                type="number"
+                min={0}
+                max={51}
+                value={videoCrf}
+                onChange={(e) => setVideoCrf(Number(e.target.value))}
+                className="h-8 w-20"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Vitesse d&apos;encodage (preset)</Label>
+              <Select value={videoPreset} onValueChange={(v) => setVideoPreset(v as VideoPreset)}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {VIDEO_PRESETS.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Label className="flex items-center gap-2 pb-1.5">
+              <Checkbox
+                checked={keepVideoSource}
+                onCheckedChange={(c) => setKeepVideoSource(c === true)}
+              />
+              Conserver la source (renommée en .mkv.bkp)
+            </Label>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="quality">Qualité (JPEG/WebP/AVIF)</Label>
-            <Input
-              id="quality"
-              type="number"
-              min={1}
-              max={100}
-              value={quality}
-              onChange={(e) => setQuality(Number(e.target.value))}
-              className="h-8 w-20"
-            />
-          </div>
-          <Label className="flex items-center gap-2 pb-1.5">
-            <Checkbox checked={keepOriginal} onCheckedChange={(c) => setKeepOriginal(c === true)} />
-            Conserver les originaux (dossier &quot;origin&quot;)
-          </Label>
-          <Label className="flex items-center gap-2 pb-1.5">
-            <Checkbox checked={forceJpeg} onCheckedChange={(c) => setForceJpeg(c === true)} />
-            Forcer la conversion en JPG
-          </Label>
-        </div>
-        {forceJpeg && (
           <p className="text-xs text-muted-foreground">
-            Convertit les PNG/WebP/AVIF en JPG (gain de place quasi garanti grâce à la compression
-            à perte, mais perd la transparence éventuelle — fond blanc à la place). Sans effet sur
-            un fichier déjà en JPEG.
+            Seule la piste vidéo est ré-encodée en x265 : toutes les pistes audio, sous-titres,
+            chapitres et polices sont recopiés à l&apos;identique, avec leurs horodatages d&apos;origine
+            (vérifiés après encodage — au moindre écart, la source n&apos;est pas touchée).{" "}
+            {videoProfile === "film"
+              ? `Taille finale plafonnée à ${Math.round(VIDEO_TARGET_RATIO * 100)} % de la source (ex : 4 Go → 2,8 Go max).`
+              : `Taille finale plafonnée d'après la durée de l'épisode (~440 Mo pour 20 min, ~800 Mo pour 50 min), et jamais plus de ${Math.round(VIDEO_TARGET_RATIO * 100)} % de la source.`}{" "}
+            Un fichier déjà en HEVC/AV1/VP9 est laissé tel quel. L&apos;encodage tourne en priorité
+            minimale pour ne pas gêner le NAS : compter plusieurs heures par film ; un preset plus
+            rapide encode plus vite mais compresse moins.
           </p>
-        )}
-      </div>
+          {!keepVideoSource && (
+            <p className="text-xs text-warning">
+              Sans conservation de la source, le fichier d&apos;origine est remplacé définitivement
+              par la version x265.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="panel flex flex-col gap-3 p-4">
+          <h3 className="text-sm font-medium">Réglages</h3>
+          <div className="flex flex-wrap items-end gap-5">
+            <div className="space-y-1.5">
+              <Label htmlFor="maxDimension">Taille max (plus grand côté)</Label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  id="maxDimension"
+                  type="number"
+                  min={100}
+                  max={20000}
+                  value={maxDimension}
+                  onChange={(e) => setMaxDimension(Number(e.target.value))}
+                  className="h-8 w-24"
+                />
+                <span className="text-sm text-muted-foreground">px</span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="quality">Qualité (JPEG/WebP/AVIF)</Label>
+              <Input
+                id="quality"
+                type="number"
+                min={1}
+                max={100}
+                value={quality}
+                onChange={(e) => setQuality(Number(e.target.value))}
+                className="h-8 w-20"
+              />
+            </div>
+            <Label className="flex items-center gap-2 pb-1.5">
+              <Checkbox checked={keepOriginal} onCheckedChange={(c) => setKeepOriginal(c === true)} />
+              Conserver les originaux (dossier &quot;origin&quot;)
+            </Label>
+            <Label className="flex items-center gap-2 pb-1.5">
+              <Checkbox checked={forceJpeg} onCheckedChange={(c) => setForceJpeg(c === true)} />
+              Forcer la conversion en JPG
+            </Label>
+          </div>
+          {forceJpeg && (
+            <p className="text-xs text-muted-foreground">
+              Convertit les PNG/WebP/AVIF en JPG (gain de place quasi garanti grâce à la compression
+              à perte, mais perd la transparence éventuelle — fond blanc à la place). Sans effet sur
+              un fichier déjà en JPEG.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1 text-sm">
@@ -315,8 +500,8 @@ export default function BrowsePage() {
           <ScanSearch className="size-4" />
           {scanning ? "Scan en cours…" : "Scanner ce dossier (récursif)"}
         </Button>
-        <Button onClick={selectAllImagesHere} variant="outline">
-          Sélectionner les photos de ce dossier
+        <Button onClick={selectAllHere} variant="outline">
+          Sélectionner les {mode === "video" ? "vidéos" : "photos"} de ce dossier
         </Button>
       </div>
 
@@ -342,7 +527,7 @@ export default function BrowsePage() {
               entries.map((entry) => (
                 <tr key={entry.path} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
                   <td className="px-4 py-2">
-                    {entry.type === "image" && (
+                    {entry.type === mode && (
                       <Checkbox
                         checked={selected.has(entry.path)}
                         onCheckedChange={() => toggleSelect(entry.path)}
@@ -360,10 +545,12 @@ export default function BrowsePage() {
                       </button>
                     ) : (
                       <span
-                        className={`flex items-center gap-2 ${entry.type === "other" ? "text-muted-foreground" : ""}`}
+                        className={`flex items-center gap-2 ${entry.type !== mode ? "text-muted-foreground" : ""}`}
                       >
                         {entry.type === "image" ? (
                           <ImageIcon className="size-4 text-muted-foreground" />
+                        ) : entry.type === "video" ? (
+                          <Film className="size-4 text-muted-foreground" />
                         ) : (
                           <File className="size-4 text-muted-foreground" />
                         )}
@@ -399,7 +586,9 @@ export default function BrowsePage() {
 
       {selected.size > 0 && (
         <div className="panel sticky bottom-4 flex flex-wrap items-center gap-3 p-4">
-          <span className="text-sm font-medium">{selected.size} photo(s) sélectionnée(s)</span>
+          <span className="text-sm font-medium">
+            {selected.size} {MODE_NOUN[mode]} sélectionnée(s)
+          </span>
           <Button variant="outline" size="sm" onClick={() => setSelected(new Set())} className="gap-1.5">
             <X className="size-4" />
             Vider la sélection
@@ -427,8 +616,9 @@ export default function BrowsePage() {
               Optimisation terminée
             </DialogTitle>
             <DialogDescription>
-              {summary?.count} photo(s) traitée(s)
-              {summary && summary.errors > 0 ? `, dont ${summary.errors} en erreur` : ""}.
+              {summary && summaryLabel(summary)}
+              {summary && summary.errors > 0 ? `, dont ${summary.errors} en erreur` : ""}
+              {summary && summary.cancelled > 0 ? `, ${summary.cancelled} annulé(s)` : ""}.
             </DialogDescription>
           </DialogHeader>
           {summary && (

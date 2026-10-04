@@ -1,5 +1,14 @@
-FROM node:22-slim AS base
+# trixie (Debian 13) plutôt que bookworm : son ffmpeg 7.1 recopie les pistes
+# audio Opus avec leur horodatage exact, là où le 5.1 de bookworm les décale
+# de quelques ms par rapport à la vidéo ré-encodée (mesuré — voir
+# src/lib/pipeline/optimizeVideo.ts, qui rejetterait alors le résultat).
+FROM node:22-trixie-slim AS base
 WORKDIR /app
+# ffmpeg/ffprobe (avec libx265) : ré-encodage des vidéos MKV (voir
+# src/lib/pipeline/optimizeVideo.ts). Dans "base" et pas seulement dans
+# "runner" : les tests vidéo tournent aussi au build (prebuild -> npm test).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 
 FROM base AS deps
 # better-sqlite3 compile ses bindings natifs via node-gyp (nécessite python3 + un compilateur C++).
@@ -19,7 +28,7 @@ FROM base AS runner
 ENV NODE_ENV=production
 ENV DATA_DIR=/data
 ENV FILES_DIR=/files
-# node:22-slim n'installe pas le paquet "locales" : sans ça, LANG est vide et
+# node:22-trixie-slim n'installe pas le paquet "locales" : sans ça, LANG est vide et
 # les outils/bibliothèques sensibles au charset peuvent mal décoder un nom de
 # fichier non-ASCII selon l'origine du volume monté (partage réseau, NAS).
 # C.UTF-8 est un locale glibc intégré (pas besoin du paquet locales/locale-gen).

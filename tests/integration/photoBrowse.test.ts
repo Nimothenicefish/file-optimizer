@@ -8,7 +8,7 @@ let photosDir: string;
 let InvalidPathError: typeof import("@/lib/photoBrowse").InvalidPathError;
 let resolvePhotoPath: typeof import("@/lib/photoBrowse").resolvePhotoPath;
 let listPhotoEntries: typeof import("@/lib/photoBrowse").listPhotoEntries;
-let listPhotosRecursive: typeof import("@/lib/photoBrowse").listPhotosRecursive;
+let listMediaRecursive: typeof import("@/lib/photoBrowse").listMediaRecursive;
 let imageContentType: typeof import("@/lib/photoBrowse").imageContentType;
 let fileRoute: typeof import("@/app/api/file/route");
 
@@ -16,7 +16,7 @@ beforeAll(async () => {
   const app = await setupTestApp("file-optimizer-browse-test-");
   tmpDir = app.tmpDir;
   photosDir = app.photosDir;
-  ({ InvalidPathError, resolvePhotoPath, listPhotoEntries, listPhotosRecursive, imageContentType } =
+  ({ InvalidPathError, resolvePhotoPath, listPhotoEntries, listMediaRecursive, imageContentType } =
     await import("@/lib/photoBrowse"));
   fileRoute = await import("@/app/api/file/route");
 
@@ -29,6 +29,10 @@ beforeAll(async () => {
   // Un original déjà préservé par un run précédent : ne doit jamais être
   // re-scanné comme une photo à optimiser.
   fs.writeFileSync(path.join(photosDir, "vacances", "origin", "photo1.jpg"), "d");
+  fs.writeFileSync(path.join(photosDir, "vacances", "film.mkv"), "e");
+  // Source conservée et encodage en cours : jamais à ré-encoder.
+  fs.writeFileSync(path.join(photosDir, "vacances", "film2.mkv.bkp"), "f");
+  fs.writeFileSync(path.join(photosDir, "vacances", "film3.mkv.part"), "g");
 });
 
 afterAll(() => {
@@ -49,7 +53,21 @@ describe("listPhotoEntries — liste un seul niveau, ignore origin/ et @eaDir", 
   it("liste les dossiers et images de 'vacances', pas le dossier origin/", () => {
     const entries = listPhotoEntries("vacances");
     const names = entries.map((e) => e.name).sort();
-    expect(names).toEqual(["jour1", "notes.txt", "photo1.jpg"]);
+    expect(names).toEqual([
+      "film.mkv",
+      "film2.mkv.bkp",
+      "film3.mkv.part",
+      "jour1",
+      "notes.txt",
+      "photo1.jpg",
+    ]);
+  });
+
+  it("classe un MKV en vidéo, mais pas sa sauvegarde .bkp ni un encodage .part", () => {
+    const types = Object.fromEntries(listPhotoEntries("vacances").map((e) => [e.name, e.type]));
+    expect(types["film.mkv"]).toBe("video");
+    expect(types["film2.mkv.bkp"]).toBe("other");
+    expect(types["film3.mkv.part"]).toBe("other");
   });
 
   it("classe correctement les types (directory/image/other)", () => {
@@ -68,15 +86,21 @@ describe("listPhotoEntries — liste un seul niveau, ignore origin/ et @eaDir", 
   });
 });
 
-describe("listPhotosRecursive — descend dans les sous-dossiers, ignore origin/", () => {
+describe("listMediaRecursive — descend dans les sous-dossiers, ignore origin/", () => {
   it("trouve les photos de tous les sous-niveaux, pas l'original déjà préservé", () => {
-    const files = listPhotosRecursive("vacances").sort();
+    const files = listMediaRecursive("vacances", "image").sort();
     expect(files).toEqual(
       [
         path.join(photosDir, "vacances", "jour1", "photo2.png"),
         path.join(photosDir, "vacances", "photo1.jpg"),
       ].sort()
     );
+  });
+
+  it("en mode vidéo, ne trouve que les MKV (jamais les photos ni les .bkp)", () => {
+    expect(listMediaRecursive("vacances", "video")).toEqual([
+      path.join(photosDir, "vacances", "film.mkv"),
+    ]);
   });
 });
 

@@ -203,3 +203,35 @@ describe("POST /api/jobs/cancel puis /api/jobs/delete-pending", () => {
     expect(data.deleted).toBe(0);
   });
 });
+
+describe("POST /api/jobs/cancel — job en cours", () => {
+  it("demande l'interruption d'un job 'running' (le worker l'arrête), ignore un job terminé", async () => {
+    db.prepare(
+      `INSERT INTO jobs (id, file_path, status, max_dimension, quality)
+       VALUES ('en-cours', '/x/en-cours.jpg', 'running', 2000, 85),
+              ('fini', '/x/fini.jpg', 'done', 2000, 85)`
+    ).run();
+    try {
+      const res = await cancelRoute.POST(
+        new Request("http://localhost/api/jobs/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: ["en-cours", "fini"] }),
+        })
+      );
+      expect(await res.json()).toEqual({ cancelled: 0, cancelling: 1 });
+
+      const rows = db
+        .prepare(
+          "SELECT id, status, cancel_requested FROM jobs WHERE id IN ('en-cours', 'fini') ORDER BY id"
+        )
+        .all();
+      expect(rows).toEqual([
+        { id: "en-cours", status: "running", cancel_requested: 1 },
+        { id: "fini", status: "done", cancel_requested: 0 },
+      ]);
+    } finally {
+      db.prepare("DELETE FROM jobs WHERE id IN ('en-cours', 'fini')").run();
+    }
+  });
+});

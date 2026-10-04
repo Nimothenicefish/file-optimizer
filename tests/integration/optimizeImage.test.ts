@@ -320,3 +320,30 @@ describe("optimizeImage — tolère un JPEG légèrement corrompu", () => {
     expect(meta.format).toBe("jpeg");
   });
 });
+
+describe("optimizeImage — annulation", () => {
+  it("n'écrit rien et laisse la photo intacte si l'annulation arrive avant l'écriture", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "photo.png");
+    await sharp({ create: { width: 3000, height: 2000, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 1 } } })
+      .png({ compressionLevel: 0 })
+      .toFile(filePath);
+    const before = fs.readFileSync(filePath);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      optimizeImage({
+        filePath,
+        maxDimension: 1000,
+        quality: 80,
+        keepOriginal: true,
+        forceJpeg: true,
+        signal: controller.signal,
+      })
+    ).rejects.toThrow();
+
+    expect(fs.readFileSync(filePath).equals(before)).toBe(true);
+    expect(fs.readdirSync(dir)).toEqual(["photo.png"]);
+  });
+});
