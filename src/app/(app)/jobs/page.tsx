@@ -75,6 +75,7 @@ export default function JobsPage() {
   const [busy, setBusy] = useState(false);
   const [deletingPending, setDeletingPending] = useState(false);
   const [deletingDone, setDeletingDone] = useState(false);
+  const [deletingCancelled, setDeletingCancelled] = useState(false);
   const [logJobId, setLogJobId] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [togglingPause, setTogglingPause] = useState(false);
@@ -177,6 +178,37 @@ export default function JobsPage() {
     }
   }
 
+  async function deleteCancelled() {
+    setDeletingCancelled(true);
+    try {
+      const res = await fetch("/api/jobs/delete-cancelled", { method: "POST" });
+      const data = await res.json();
+      toast.success(`${data.deleted} job(s) annulé(s) supprimé(s)`);
+      await load();
+    } finally {
+      setDeletingCancelled(false);
+    }
+  }
+
+  // Retire un job terminé/en erreur/annulé de l'historique (aucun fichier
+  // touché) ; un job en attente ou en cours doit d'abord être annulé.
+  async function deleteJob(id: string) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/jobs/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [id] }),
+      });
+      const data = await res.json();
+      if (data.deleted > 0) toast.success("Job supprimé");
+      if (logJobId === id) setLogJobId(null);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const logJob = jobs.find((j) => j.id === logJobId) ?? null;
 
@@ -246,6 +278,16 @@ export default function JobsPage() {
           <Trash2 className="size-4" />
           {deletingDone ? "Suppression…" : "Supprimer les jobs terminés"}
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={deleteCancelled}
+          disabled={deletingCancelled}
+          className="gap-1.5"
+        >
+          <Trash2 className="size-4" />
+          {deletingCancelled ? "Suppression…" : "Supprimer les jobs annulés"}
+        </Button>
       </div>
 
       <div className="panel overflow-x-auto">
@@ -304,6 +346,18 @@ export default function JobsPage() {
                     <Button variant="outline" size="sm" onClick={() => setLogJobId(job.id)}>
                       Détails
                     </Button>
+                    {!isCancellable(job) && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => deleteJob(job.id)}
+                        disabled={busy}
+                        aria-label="Supprimer ce job"
+                        title="Supprimer ce job (le fichier n'est pas touché)"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    )}
                   </div>
                 </td>
               </tr>

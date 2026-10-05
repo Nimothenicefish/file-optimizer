@@ -235,3 +235,55 @@ describe("POST /api/jobs/cancel — job en cours", () => {
     }
   });
 });
+
+describe("Suppression de jobs terminés de l'historique", () => {
+  const insert = (id: string, status: string) =>
+    db
+      .prepare(
+        `INSERT INTO jobs (id, file_path, status, max_dimension, quality)
+         VALUES (?, ?, ?, 2000, 85)`
+      )
+      .run(id, `/x/${id}.jpg`, status);
+  const statusOf = (id: string) =>
+    (db.prepare("SELECT status FROM jobs WHERE id = ?").get(id) as { status: string } | undefined)
+      ?.status;
+
+  it("POST /api/jobs/delete supprime un job annulé/en erreur, jamais un job en cours", async () => {
+    const deleteRoute = await import("@/app/api/jobs/delete/route");
+    insert("annule", "cancelled");
+    insert("erreur", "error");
+    insert("actif", "running");
+    try {
+      const res = await deleteRoute.POST(
+        new Request("http://localhost/api/jobs/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: ["annule", "erreur", "actif"] }),
+        })
+      );
+      expect(await res.json()).toEqual({ deleted: 2 });
+      expect(statusOf("annule")).toBeUndefined();
+      expect(statusOf("erreur")).toBeUndefined();
+      expect(statusOf("actif")).toBe("running");
+    } finally {
+      db.prepare("DELETE FROM jobs WHERE id IN ('annule', 'erreur', 'actif')").run();
+    }
+  });
+
+  it("POST /api/jobs/delete-cancelled ne supprime que les jobs annulés", async () => {
+    const deleteCancelledRoute = await import("@/app/api/jobs/delete-cancelled/route");
+    insert("annule-1", "cancelled");
+    insert("annule-2", "cancelled");
+    insert("fini-garde", "done");
+    try {
+      const res = await deleteCancelledRoute.POST();
+      const { deleted } = await res.json();
+      expect(deleted).toBeGreaterThanOrEqual(2);
+      expect(statusOf("annule-1")).toBeUndefined();
+      expect(statusOf("annule-2")).toBeUndefined();
+      expect(statusOf("fini-garde")).toBe("done");
+    } finally {
+      db.prepare("DELETE FROM jobs WHERE id = 'fini-garde'").run();
+    }
+  });
+});

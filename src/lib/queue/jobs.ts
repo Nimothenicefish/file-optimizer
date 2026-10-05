@@ -107,6 +107,12 @@ export function deleteDoneJobs(): number {
   return db.prepare("DELETE FROM jobs WHERE status = 'done'").run().changes;
 }
 
+export function deleteCancelledJobs(): number {
+  return db.prepare("DELETE FROM jobs WHERE status = 'cancelled'").run().changes;
+}
+
+// Supprime des jobs précis de l'historique — jamais un job en attente ou en
+// cours (à annuler d'abord), ignorés sans erreur. Ne touche à aucun fichier.
 export function deleteJobs(ids: string[]): number {
   const del = db.prepare("DELETE FROM jobs WHERE id = ? AND status NOT IN ('pending', 'running')");
   let changed = 0;
