@@ -345,10 +345,17 @@ export default function JobsPage() {
       </div>
 
       <Dialog open={logJob != null} onOpenChange={(open) => !open && setLogJobId(null)}>
-        <DialogContent className="max-h-[85vh] max-w-2xl overflow-hidden sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="truncate font-mono text-sm">{logJob?.file_path}</DialogTitle>
-            <DialogDescription>
+        {/* grid-cols-1 = minmax(0, 1fr) : sans lui, la colonne de la grille
+            s'élargit jusqu'au contenu le plus large (long chemin, longue
+            ligne de log) et déborde de la modale. */}
+        <DialogContent className="max-h-[85vh] grid-cols-1 overflow-hidden sm:max-w-2xl">
+          <DialogHeader className="min-w-0">
+            {/* Chemin complet sur plusieurs lignes (lisible en entier) ; pr-8
+                laisse la place au bouton de fermeture. */}
+            <DialogTitle className="pr-8 font-mono text-sm leading-snug break-all">
+              {logJob?.file_path}
+            </DialogTitle>
+            <DialogDescription className="break-words">
               {logJob?.kind === "video" ? (
                 <>
                   Vidéo x265 ({logJob.video_profile === "series" ? "série" : "film"}) · CRF :{" "}
@@ -364,7 +371,7 @@ export default function JobsPage() {
               )}
             </DialogDescription>
           </DialogHeader>
-          <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs text-foreground">
+          <pre className="max-h-[60vh] min-w-0 overflow-x-hidden overflow-y-auto rounded-lg bg-muted p-3 text-xs break-words whitespace-pre-wrap text-foreground">
             {logJob?.log || "(vide)"}
           </pre>
         </DialogContent>
