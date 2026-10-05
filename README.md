@@ -27,6 +27,20 @@ authentification par session, Docker.
   par statut, avec détails (log, taille avant/après) et actions groupées
   (annuler les jobs sélectionnés, supprimer tous les jobs en
   attente/terminés).
+  - **Pause** : aucun nouveau job ne démarre, et une vidéo en cours
+    d'encodage est **gelée** (process ffmpeg suspendu) puis reprise là où
+    elle en était — rien n'est perdu ni réécrit, la vérification finale
+    habituelle s'applique toujours. ffmpeg garde sa mémoire pendant la pause
+    (CPU à 0). Une photo en cours n'est pas gelée (traitée dans l'app
+    elle-même, en quelques secondes) : elle se termine. Un redémarrage du
+    conteneur pendant la pause fait perdre l'encodage en cours (job en
+    erreur, source intacte).
+  - **Avancement et temps restant** : % et temps restant estimé pour la
+    vidéo en cours (sur /jobs) et pour le lot entier (barre sur Parcourir,
+    qui reprend après un rafraîchissement). Estimation d'après la vitesse
+    déjà mesurée (photos : durée moyenne ; vidéos : temps par octet source,
+    appliqué à la taille des vidéos restantes), pauses déduites —
+    approximative, surtout en début de lot.
   - **Annuler** un job en attente le retire de la file ; annuler le job **en
     cours** l'interrompt dans la seconde (vidéo : ffmpeg arrêté, fichier
     temporaire supprimé ; photo : abandon juste avant l'écriture). Le fichier

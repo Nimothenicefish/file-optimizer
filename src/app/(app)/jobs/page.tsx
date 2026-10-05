@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { formatGain, formatSize } from "@/lib/format";
+import { formatGain, formatRemaining, formatSize } from "@/lib/format";
 
 type Job = {
   id: string;
@@ -29,6 +29,8 @@ type Job = {
   video_profile: string | null;
   progress: number | null;
   cancel_requested: number;
+  remaining_ms: number | null;
+  paused_at: number | null;
   original_size: number | null;
   optimized_size: number | null;
   error: string | null;
@@ -53,6 +55,15 @@ const STATUS_VARIANT: Record<string, "secondary" | "default" | "destructive" | "
 };
 
 const PAGE_SIZE = 25;
+
+// Libellé d'un job en cours : étape et avancement (vidéo), null sinon.
+function runningLabel(job: Job): string | null {
+  if (job.status !== "running") return null;
+  if (job.cancel_requested) return "annulation…";
+  if (job.progress == null) return job.paused_at != null ? "en pause" : null;
+  if (job.progress >= 100) return job.paused_at != null ? "en pause (vérification)" : "vérification…";
+  return `${job.paused_at != null ? "en pause" : "en cours"} ${Math.floor(job.progress)} %`;
+}
 
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -191,8 +202,8 @@ export default function JobsPage() {
         </Button>
         {paused && (
           <span className="text-sm text-warning">
-            En pause — aucun nouveau job ne démarre
-            {(statusCounts.running ?? 0) > 0 ? ", le job en cours se termine encore." : "."}
+            En pause — aucun nouveau job ne démarre ; une vidéo en cours est gelée et reprendra
+            là où elle en est (une photo en cours se termine).
           </span>
         )}
       </div>
@@ -262,13 +273,13 @@ export default function JobsPage() {
                 <td className="px-4 py-2 font-mono text-xs text-foreground">{job.file_path}</td>
                 <td className="px-4 py-2">
                   <Badge variant={STATUS_VARIANT[job.status] ?? "secondary"}>
-                    {job.status === "running" && job.cancel_requested
-                      ? "annulation…"
-                      : STATUS_LABEL[job.status] ?? job.status}
-                    {job.status === "running" && !job.cancel_requested && job.progress != null
-                      ? ` ${Math.floor(job.progress)} %`
-                      : ""}
+                    {runningLabel(job) ?? STATUS_LABEL[job.status] ?? job.status}
                   </Badge>
+                  {job.status === "running" && !job.cancel_requested && job.remaining_ms != null && job.remaining_ms > 0 && (
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {formatRemaining(job.remaining_ms)} restant
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2 text-muted-foreground">{formatSize(job.original_size)}</td>
                 <td className="px-4 py-2 text-muted-foreground">{formatSize(job.optimized_size)}</td>

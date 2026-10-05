@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
+import fs from "node:fs";
 import { db } from "@/lib/db";
+import { type EtaJob, estimateBatch, runningVideoRemainingMs } from "@/lib/eta";
 import { parseOptimizeSettings, toEnqueueParams } from "@/lib/optimizeSettings";
 import { InvalidPathError, mediaKind, resolvePhotoPath } from "@/lib/photoBrowse";
 import { enqueueFiles } from "@/lib/queue/worker";
 import { isQueuePaused } from "@/lib/queueSettings";
+
+function fileSize(filePath: string): number | null {
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -19,8 +29,14 @@ export async function GET(req: Request) {
       .filter(Boolean);
     if (ids.length === 0) return NextResponse.json({ jobs: [] });
     const placeholders = ids.map(() => "?").join(",");
-    const jobs = db.prepare(`SELECT * FROM jobs WHERE id IN (${placeholders})`).all(...ids);
-    return NextResponse.json({ jobs });
+    const jobs = db
+      .prepare(`SELECT * FROM jobs WHERE id IN (${placeholders})`)
+      .all(...ids) as EtaJob[];
+    return NextResponse.json({
+      jobs,
+      batch: estimateBatch(jobs, Date.now(), fileSize),
+      paused: isQueuePaused(),
+    });
   }
 
   const status = searchParams.get("status") ?? "";
@@ -38,9 +54,12 @@ export async function GET(req: Request) {
   ).c;
 
   const offset = (page - 1) * pageSize;
-  const jobs = db
-    .prepare(`SELECT * FROM jobs ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
-    .all(...params, pageSize, offset);
+  const now = Date.now();
+  const jobs = (
+    db
+      .prepare(`SELECT * FROM jobs ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+      .all(...params, pageSize, offset) as EtaJob[]
+  ).map((job) => ({ ...job, remaining_ms: runningVideoRemainingMs(job, now) }));
 
   const statusCountRows = db
     .prepare("SELECT status, COUNT(*) as count FROM jobs GROUP BY status")

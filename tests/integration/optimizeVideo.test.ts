@@ -15,6 +15,7 @@ let describeCrf: typeof import("@/lib/videoSettings").describeCrf;
 let DEFAULT_VIDEO_CRF: number;
 let scanRoute: typeof import("@/app/api/scan/route");
 let cancelRoute: typeof import("@/app/api/jobs/cancel/route");
+let setQueuePaused: typeof import("@/lib/queueSettings").setQueuePaused;
 let recoverInterruptedJobs: typeof import("@/lib/queue/worker").recoverInterruptedJobs;
 let fixtureDir: string;
 
@@ -52,7 +53,7 @@ function packetsByStream(file: string): Map<number, { first: number; count: numb
 // MKV "type film" : vidéo H.264 lourde (CRF bas : gain x265 garanti), deux
 // pistes audio dont une volontairement décalée de 0,5 s (doit le rester),
 // sous-titres SRT "forcés", pièce jointe (comme une police ASS).
-function makeSourceMkv(target: string, videoCodec = "libx264") {
+function makeSourceMkv(target: string, videoCodec = "libx264", durationS = 5) {
   const srt = path.join(fixtureDir, "subs.srt");
   fs.writeFileSync(
     srt,
@@ -60,9 +61,9 @@ function makeSourceMkv(target: string, videoCodec = "libx264") {
   );
   execFileSync("ffmpeg", [
     "-v", "error", "-y",
-    "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=5",
-    "-itsoffset", "0.5", "-f", "lavfi", "-i", "sine=frequency=440:duration=4.5",
-    "-f", "lavfi", "-i", "sine=frequency=880:duration=5",
+    "-f", "lavfi", "-i", `testsrc2=size=640x360:rate=25:duration=${durationS}`,
+    "-itsoffset", "0.5", "-f", "lavfi", "-i", `sine=frequency=440:duration=${durationS - 0.5}`,
+    "-f", "lavfi", "-i", `sine=frequency=880:duration=${durationS}`,
     "-i", srt,
     "-map", "0", "-map", "1", "-map", "2", "-map", "3",
     "-c:v", videoCodec, "-crf", "8", "-preset", "ultrafast",
@@ -87,6 +88,7 @@ beforeAll(async () => {
   ({ videoTargetSize, describeCrf, DEFAULT_VIDEO_CRF } = await import("@/lib/videoSettings"));
   scanRoute = await import("@/app/api/scan/route");
   cancelRoute = await import("@/app/api/jobs/cancel/route");
+  ({ setQueuePaused } = await import("@/lib/queueSettings"));
   fixtureDir = path.join(tmpDir, "fixtures");
   fs.mkdirSync(fixtureDir);
 });
@@ -412,6 +414,57 @@ describe("worker + scan en mode vidéo", () => {
     expect(fs.existsSync(`${filePath}.part`)).toBe(false);
     expect(fs.readFileSync(filePath).equals(before)).toBe(true);
   }, 70000);
+
+  it("pause de la file : gèle l'encodage en cours puis le reprend sans rien perdre", async () => {
+    const dir = path.join(photosDir, "pause");
+    fs.mkdirSync(dir);
+    const filePath = path.join(dir, "film.mkv");
+    // Plus longue que les autres : l'encodage doit durer le temps de la pause.
+    makeSourceMkv(filePath, "libx264", 30);
+    const partPath = `${filePath}.part`;
+
+    const res = await scanRoute.POST(
+      new Request("http://localhost/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "pause", mode: "video", videoPreset: "slow" }),
+      })
+    );
+    const jobId = (await res.json()).ids[0];
+    const row = () =>
+      db.prepare("SELECT status, paused_at, paused_ms, log FROM jobs WHERE id = ?").get(jobId) as {
+        status: string;
+        paused_at: number | null;
+        paused_ms: number;
+        log: string;
+      };
+
+    await waitFor(() => fs.existsSync(partPath) && fs.statSync(partPath).size > 0, {
+      timeoutMs: 30000,
+    });
+    setQueuePaused(true);
+    try {
+      await waitFor(() => row().paused_at != null, { timeoutMs: 5000 });
+      // Gelé : le fichier temporaire ne grossit plus, le job reste "running".
+      await new Promise((r) => setTimeout(r, 500));
+      const frozenSize = fs.statSync(partPath).size;
+      await new Promise((r) => setTimeout(r, 2000));
+      expect(fs.statSync(partPath).size).toBe(frozenSize);
+      expect(row().status).toBe("running");
+    } finally {
+      setQueuePaused(false);
+    }
+
+    await waitFor(() => row().status === "done", { timeoutMs: 60000 });
+    const job = row();
+    expect(job.paused_at).toBeNull();
+    expect(job.paused_ms).toBeGreaterThanOrEqual(2000);
+    expect(job.log).toContain("mis en pause");
+    expect(job.log).toContain("repris");
+    // La vérification habituelle (pistes, paquets, synchro) est passée.
+    expect(job.log).toContain("pistes et synchronisation identiques à la source");
+    expect(probeStreams(filePath)[0].codec_name).toBe("hevc");
+  }, 90000);
 
   it("supprime le fichier temporaire d'un encodage interrompu par un redémarrage", () => {
     const filePath = path.join(fixtureDir, "interrompu.mkv");

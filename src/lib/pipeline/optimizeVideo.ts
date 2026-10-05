@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,7 +25,13 @@ export type OptimizeVideoParams = {
   // Annulation : arrête ffmpeg/ffprobe en cours ; la source n'est jamais
   // touchée (remplacée seulement à la toute fin, après le dernier contrôle).
   signal?: AbortSignal;
+  // Process ffmpeg/ffprobe en cours (null entre deux) — permet de le geler
+  // (SIGSTOP) puis de le reprendre (SIGCONT) là où il en était, sans rien
+  // perdre de l'encodage : voir la pause dans src/lib/queue/worker.ts.
+  onProcess?: (child: ChildProcess | null) => void;
 };
+
+type ProcessControl = Pick<OptimizeVideoParams, "signal" | "onProcess">;
 
 export type OptimizeVideoResult = {
   originalSize: number;
@@ -105,7 +111,7 @@ function runProcess(
   command: string,
   args: string[],
   onLine: (line: string) => void,
-  signal?: AbortSignal
+  { signal, onProcess }: ProcessControl = {}
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(signal.reason);
@@ -120,6 +126,7 @@ function runProcess(
     // cœur en priorité minimale) pour un fichier qui sera jeté de toute façon.
     const onAbort = () => child.kill("SIGKILL");
     signal?.addEventListener("abort", onAbort, { once: true });
+    onProcess?.(child);
     let stderrTail = "";
     child.stderr.on("data", (chunk: Buffer) => {
       stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_BYTES);
@@ -134,6 +141,7 @@ function runProcess(
     });
     child.on("close", (code) => {
       signal?.removeEventListener("abort", onAbort);
+      onProcess?.(null);
       if (signal?.aborted) reject(signal.reason);
       else if (code === 0) resolve();
       // 127 : commande introuvable (renvoyé par nice/ionice, qui eux existent).
@@ -143,7 +151,7 @@ function runProcess(
   });
 }
 
-async function probe(filePath: string, signal?: AbortSignal): Promise<Probe> {
+async function probe(filePath: string, ctl?: ProcessControl): Promise<Probe> {
   let json = "";
   await runProcess(
     "ffprobe",
@@ -151,14 +159,14 @@ async function probe(filePath: string, signal?: AbortSignal): Promise<Probe> {
     (line) => {
       json += line + "\n";
     },
-    signal
+    ctl
   );
   return JSON.parse(json) as Probe;
 }
 
 // Nombre de paquets et horodatage du premier paquet de chaque piste — lit
 // tout le fichier (démultiplexage seul, sans décodage : rapide).
-async function packetStats(filePath: string, signal?: AbortSignal): Promise<PacketStats> {
+async function packetStats(filePath: string, ctl?: ProcessControl): Promise<PacketStats> {
   const stats: PacketStats = new Map();
   await runProcess(
     "ffprobe",
@@ -176,7 +184,7 @@ async function packetStats(filePath: string, signal?: AbortSignal): Promise<Pack
       }
       stats.set(index, entry);
     },
-    signal
+    ctl
   );
   return stats;
 }
@@ -198,11 +206,15 @@ function streamBitrate(stream: ProbeStream): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// Part du budget gardée en réserve pour la structure du conteneur MKV et les
+// pics de débit tolérés par le plafond (mesuré : +0,3 % sans réserve).
+const SIZE_SAFETY_MARGIN = 0.02;
+
 // Débit vidéo maximal (bits/s) pour que le fichier final ne dépasse pas
 // targetSize (voir videoTargetSize) : budget total sur la durée de la vidéo,
 // moins ce que prennent les pistes recopiées telles quelles (audio...).
 export function computeVideoMaxrate(targetSize: number, durationS: number, copiedBps: number): number {
-  const budgetBps = (targetSize * 8) / durationS - copiedBps;
+  const budgetBps = (targetSize * 8 * (1 - SIZE_SAFETY_MARGIN)) / durationS - copiedBps;
   return Math.max(MIN_VIDEO_MAXRATE_BPS, Math.floor(budgetBps));
 }
 
@@ -320,10 +332,12 @@ export function partPathFor(filePath: string): string {
 // résultat est vérifié (pistes, nombre de paquets, horodatages, durée)
 // AVANT de toucher à la source : au moindre écart, la source reste intacte.
 export async function optimizeVideo(params: OptimizeVideoParams): Promise<OptimizeVideoResult> {
-  const { filePath, crf, preset, profile, keepSource, onProgress, onPercent, signal } = params;
+  const { filePath, crf, preset, profile, keepSource, onProgress, onPercent, signal, onProcess } =
+    params;
+  const ctl: ProcessControl = { signal, onProcess };
   const originalSize = fs.statSync(filePath).size;
 
-  const source = await probe(filePath, signal);
+  const source = await probe(filePath, ctl);
   const durationS = Number(source.format.duration);
   if (!Number.isFinite(durationS) || durationS <= 0) {
     throw new Error("Durée de la vidéo illisible (fichier corrompu ?)");
@@ -449,15 +463,18 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
           onProgress?.(`encodage : ${lastPercentLogged} %`);
         }
       },
-      signal
+      ctl
     );
 
+    // Le dernier avancement rapporté par ffmpeg n'atteint pas forcément 100
+    // (nombre d'images estimé d'après la durée) : fin d'encodage explicite.
+    onPercent?.(100);
     onProgress?.("vérification des pistes et de la synchronisation…");
-    const output = await probe(partPath, signal);
+    const output = await probe(partPath, ctl);
     // L'un après l'autre (pas en parallèle) : deux lectures complètes
     // simultanées de gros fichiers saturent inutilement le disque du NAS.
-    const sourcePackets = await packetStats(filePath, signal);
-    const outputPackets = await packetStats(partPath, signal);
+    const sourcePackets = await packetStats(filePath, ctl);
+    const outputPackets = await packetStats(partPath, ctl);
     const problems = verifyOutput(source, output, sourcePackets, outputPackets);
     if (problems.length > 0) {
       throw new Error(`Résultat rejeté, source conservée intacte — ${problems.join(" ; ")}`);
@@ -473,10 +490,16 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
       return { originalSize, optimizedSize: originalSize, finalPath: filePath };
     }
     if (optimizedSize > targetSize) {
+      // Plafond au plancher : c'est l'audio copié qui empêche d'atteindre la
+      // cible ; sinon, simple dépassement marginal (pics de débit).
+      const cause =
+        maxrateBps === MIN_VIDEO_MAXRATE_BPS
+          ? "pistes audio copiées trop lourdes pour l'atteindre"
+          : "léger dépassement dû aux pics de débit";
       onProgress?.(
         `attention : ${Math.round(optimizedSize / 1e6)} Mo, au-dessus de la cible (${Math.round(
           targetSize / 1e6
-        )} Mo) — pistes audio copiées trop lourdes pour l'atteindre ; gardé car plus petit que la source`
+        )} Mo) — ${cause} ; gardé car plus petit que la source`
       );
     }
 

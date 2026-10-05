@@ -50,6 +50,18 @@ function createDb() {
       -- src/lib/queue/jobs.ts) : le worker la détecte pendant le traitement
       -- et l'interrompt.
       cancel_requested INTEGER NOT NULL DEFAULT 0,
+      -- Début/fin réels du traitement (epoch ms, horloge du serveur) : base
+      -- des estimations de temps restant (voir src/lib/eta.ts). Mesurés par
+      -- job plutôt que depuis le début du lot : une pause de la file ne
+      -- fausse pas l'estimation.
+      started_at INTEGER,
+      finished_at INTEGER,
+      -- Pause d'un job vidéo en cours (process ffmpeg gelé, voir
+      -- src/lib/queue/worker.ts) : paused_at = début de la pause actuelle
+      -- (NULL hors pause), paused_ms = cumul des pauses terminées — retirés
+      -- du temps écoulé dans les estimations.
+      paused_at INTEGER,
+      paused_ms INTEGER NOT NULL DEFAULT 0,
       original_size INTEGER,
       optimized_size INTEGER,
       error TEXT,
@@ -68,9 +80,11 @@ function createDb() {
     );
 
     -- Une seule ligne (id=1) : quand paused=1, le worker (voir tick() dans
-    -- src/lib/queue/worker.ts) ne démarre plus aucun NOUVEAU job, mais laisse
-    -- un job déjà "running" se terminer normalement — bouton pause/reprise
-    -- sur /jobs. Persisté en base : survit à un redémarrage du conteneur.
+    -- src/lib/queue/worker.ts) ne démarre plus aucun NOUVEAU job, et gèle un
+    -- encodage vidéo en cours (repris là où il en était) ; une photo en
+    -- cours (quelques secondes) se termine normalement — bouton
+    -- pause/reprise sur /jobs. Persisté en base : survit à un redémarrage
+    -- du conteneur.
     CREATE TABLE IF NOT EXISTS queue_settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       paused INTEGER NOT NULL DEFAULT 0
@@ -87,6 +101,10 @@ function createDb() {
   ensureColumn(instance, "jobs", "video_profile", "TEXT");
   ensureColumn(instance, "jobs", "progress", "REAL");
   ensureColumn(instance, "jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(instance, "jobs", "started_at", "INTEGER");
+  ensureColumn(instance, "jobs", "finished_at", "INTEGER");
+  ensureColumn(instance, "jobs", "paused_at", "INTEGER");
+  ensureColumn(instance, "jobs", "paused_ms", "INTEGER NOT NULL DEFAULT 0");
 
   instance
     .prepare(

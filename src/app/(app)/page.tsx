@@ -11,6 +11,8 @@ import {
   Folder,
   Image as ImageIcon,
   Loader2,
+  Pause,
+  Play,
   RefreshCw,
   ScanSearch,
   Sparkles,
@@ -37,7 +39,8 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatSize } from "@/lib/format";
+import type { BatchEstimate } from "@/lib/eta";
+import { formatRemaining, formatSize } from "@/lib/format";
 import {
   CRF_LEVELS,
   DEFAULT_VIDEO_CRF,
@@ -152,7 +155,9 @@ export default function BrowsePage() {
   const [enqueuing, setEnqueuing] = useState(false);
 
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
-  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
+  const [batchProgress, setBatchProgress] = useState<BatchEstimate | null>(null);
+  const [queuePaused, setQueuePaused] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [summary, setSummary] = useState<BatchSummary | null>(null);
 
   const [previewPath, setPreviewPath] = useState<string | null>(null);
@@ -199,7 +204,8 @@ export default function BrowsePage() {
       if (cancelled) return;
       const jobs: BatchJob[] = data.jobs ?? [];
       const terminal = jobs.filter((j) => j.status !== "pending" && j.status !== "running");
-      setBatchProgress({ done: terminal.length, total: jobs.length });
+      setBatchProgress(data.batch ?? null);
+      setQueuePaused(Boolean(data.paused));
       // Comparé aux jobs RETROUVÉS (pas aux ids demandés) : un job supprimé
       // depuis /jobs entre-temps ne bloque pas le bilan indéfiniment.
       if (terminal.length === jobs.length) {
@@ -226,6 +232,22 @@ export default function BrowsePage() {
       clearInterval(interval);
     };
   }, [batchIds]);
+
+  async function resumeQueue() {
+    setResuming(true);
+    try {
+      const res = await fetch("/api/queue-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: false }),
+      });
+      const data = await res.json();
+      setQueuePaused(Boolean(data.paused));
+      toast.success("Traitement repris");
+    } finally {
+      setResuming(false);
+    }
+  }
 
   const load = useCallback(async (nextPath: string) => {
     setLoading(true);
@@ -646,11 +668,38 @@ export default function BrowsePage() {
       )}
 
       {batchIds && (
-        <div className="panel sticky bottom-4 flex items-center gap-3 p-4">
-          <Loader2 className="size-4 animate-spin text-primary" />
-          <span className="text-sm font-medium">
-            Optimisation en cours… {batchProgress.done} / {batchProgress.total}
-          </span>
+        <div className="panel sticky bottom-4 flex flex-col gap-2 p-4">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {queuePaused ? (
+              <Pause className="size-4 text-warning" />
+            ) : (
+              <Loader2 className="size-4 animate-spin text-primary" />
+            )}
+            <span className="text-sm font-medium">
+              {queuePaused ? "Traitement en pause" : "Optimisation en cours…"}{" "}
+              {batchProgress && `${batchProgress.done} / ${batchProgress.total}`}
+            </span>
+            {batchProgress && (
+              <span className="ml-auto text-sm text-muted-foreground">
+                {Math.floor(batchProgress.percent)} %
+                {!queuePaused && batchProgress.remainingMs != null && batchProgress.remainingMs > 0
+                  ? ` · ${formatRemaining(batchProgress.remainingMs)} restant`
+                  : ""}
+              </span>
+            )}
+            {queuePaused && (
+              <Button size="sm" onClick={resumeQueue} disabled={resuming} className="gap-1.5">
+                <Play className="size-4" />
+                {resuming ? "…" : "Reprendre"}
+              </Button>
+            )}
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className={`h-full rounded-full transition-[width] duration-700 ${queuePaused ? "bg-warning" : "bg-primary"}`}
+              style={{ width: `${batchProgress?.percent ?? 0}%` }}
+            />
+          </div>
         </div>
       )}
 

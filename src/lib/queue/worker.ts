@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { db } from "@/lib/db";
 import { optimizeImage } from "@/lib/pipeline/optimizeImage";
@@ -32,12 +33,55 @@ type JobRow = {
 // aussi souvent pour un affichage rafraîchi toutes les 3s).
 const PROGRESS_WRITE_INTERVAL_MS = 3000;
 
-// Fréquence de vérification d'une demande d'annulation du job en cours (voir
-// cancelJobs) — lue en base plutôt que transmise en mémoire : la route API
-// et le worker ne partagent pas forcément la même instance de module.
-const CANCEL_POLL_INTERVAL_MS = 1000;
+// Fréquence de vérification d'une demande d'annulation ou d'une pause du job
+// en cours (voir cancelJobs et setQueuePaused) — lues en base plutôt que
+// transmises en mémoire : la route API et le worker ne partagent pas
+// forcément la même instance de module.
+const SUPERVISE_INTERVAL_MS = 1000;
 
-function runOptimization(job: JobRow, signal: AbortSignal) {
+// Pause d'un encodage vidéo en cours : le process ffmpeg/ffprobe est gelé
+// (SIGSTOP) puis repris (SIGCONT) exactement là où il en était — rien n'est
+// perdu ni réécrit, ffmpeg ne voit pas la différence, et la vérification
+// finale habituelle tourne toujours avant de remplacer la source. Il garde
+// sa mémoire pendant la pause (CPU à 0). Une photo en cours n'est pas gelée :
+// elle se termine en quelques secondes.
+class VideoFreezer {
+  private child: ChildProcess | null = null;
+  private frozen = false;
+
+  constructor(private readonly jobId: string) {}
+
+  // Branché sur onProcess d'optimizeVideo : un process lancé pendant une
+  // pause (étape suivante : vérification...) est gelé aussitôt.
+  readonly track = (child: ChildProcess | null) => {
+    this.child = child;
+    if (child && this.frozen) child.kill("SIGSTOP");
+  };
+
+  sync(paused: boolean) {
+    if (paused === this.frozen) return;
+    this.frozen = paused;
+    const now = Date.now();
+    if (paused) {
+      this.child?.kill("SIGSTOP");
+      db.prepare("UPDATE jobs SET paused_at = ? WHERE id = ?").run(now, this.jobId);
+      appendLog(this.jobId, "mis en pause (encodage gelé, reprendra là où il en est)");
+    } else {
+      this.child?.kill("SIGCONT");
+      this.endPause(now);
+      appendLog(this.jobId, "repris");
+    }
+  }
+
+  // Comptabilise la pause en cours dans paused_ms (reprise, ou fin du job).
+  endPause(now = Date.now()) {
+    db.prepare(
+      "UPDATE jobs SET paused_ms = paused_ms + (? - paused_at), paused_at = NULL WHERE id = ? AND paused_at IS NOT NULL"
+    ).run(now, this.jobId);
+  }
+}
+
+function runOptimization(job: JobRow, signal: AbortSignal, freezer: VideoFreezer) {
   const onProgress = (msg: string) => appendLog(job.id, msg);
 
   if (job.kind === "video") {
@@ -49,10 +93,13 @@ function runOptimization(job: JobRow, signal: AbortSignal) {
       profile: isVideoProfile(job.video_profile) ? job.video_profile : DEFAULT_VIDEO_PROFILE,
       keepSource: job.keep_original === 1,
       signal,
+      onProcess: freezer.track,
       onProgress,
       onPercent: (percent) => {
         const now = Date.now();
-        if (now - lastWrite < PROGRESS_WRITE_INTERVAL_MS) return;
+        // 100 % toujours écrit : marque la fin de l'encodage (début de la
+        // vérification) pour l'affichage, quel que soit le dernier envoi.
+        if (percent < 100 && now - lastWrite < PROGRESS_WRITE_INTERVAL_MS) return;
         lastWrite = now;
         db.prepare("UPDATE jobs SET progress = ? WHERE id = ?").run(percent, job.id);
       },
@@ -76,28 +123,33 @@ function appendLog(jobId: string, line: string) {
   ).run(line, jobId);
 }
 
+// Toujours un statut terminal (done/error/cancelled) : horodate la fin.
 function setStatus(jobId: string, status: string, error?: string) {
   db.prepare(
-    "UPDATE jobs SET status = ?, error = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(status, error ?? null, jobId);
+    "UPDATE jobs SET status = ?, error = ?, finished_at = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(status, error ?? null, Date.now(), jobId);
 }
 
 async function processJob(job: JobRow) {
-  db.prepare("UPDATE jobs SET status = 'running', updated_at = datetime('now') WHERE id = ?").run(
-    job.id
-  );
+  db.prepare(
+    "UPDATE jobs SET status = 'running', started_at = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(Date.now(), job.id);
 
   const controller = new AbortController();
-  const cancelPoll = setInterval(() => {
+  const freezer = new VideoFreezer(job.id);
+  const supervise = setInterval(() => {
+    // Annulation possible même pendant une pause : SIGKILL arrête aussi un
+    // process gelé.
     if (isCancelRequested(job.id)) controller.abort();
-  }, CANCEL_POLL_INTERVAL_MS);
+    else if (job.kind === "video") freezer.sync(isQueuePaused());
+  }, SUPERVISE_INTERVAL_MS);
 
   try {
     if (!fs.existsSync(job.file_path)) {
       throw new Error("Fichier introuvable (déplacé ou supprimé depuis la mise en file).");
     }
 
-    const result = await runOptimization(job, controller.signal);
+    const result = await runOptimization(job, controller.signal, freezer);
 
     db.prepare(
       "UPDATE jobs SET original_size = ?, optimized_size = ?, file_path = ? WHERE id = ?"
@@ -117,7 +169,8 @@ async function processJob(job: JobRow) {
     appendLog(job.id, `ERREUR: ${message}`);
     setStatus(job.id, "error", message);
   } finally {
-    clearInterval(cancelPoll);
+    clearInterval(supervise);
+    freezer.endPause();
   }
 }
 
