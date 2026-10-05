@@ -473,7 +473,9 @@ export default function BrowsePage() {
             {videoProfile === "film"
               ? `Taille finale plafonnée à ${Math.round(VIDEO_TARGET_RATIO * 100)} % de la source (ex : 4 Go → 2,8 Go max).`
               : `Taille finale plafonnée d'après la durée de l'épisode (~440 Mo pour 20 min, ~800 Mo pour 50 min), et jamais plus de ${Math.round(VIDEO_TARGET_RATIO * 100)} % de la source.`}{" "}
-            Un fichier déjà en HEVC/AV1/VP9 est laissé tel quel. L&apos;encodage tourne en priorité
+            Un fichier déjà en HEVC/AV1/VP9 n&apos;est ré-encodé que s&apos;il est encore lourd pour
+            son type (film : plus de ~1,4 Go par heure ; série : au-dessus du plafond), et jamais un
+            fichier déjà produit par l&apos;app. L&apos;encodage tourne en priorité
             minimale pour ne pas gêner le NAS : compter plusieurs heures par film ; un preset plus
             rapide encode plus vite mais compresse moins.
           </p>

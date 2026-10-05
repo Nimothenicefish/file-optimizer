@@ -53,7 +53,10 @@ function packetsByStream(file: string): Map<number, { first: number; count: numb
 // MKV "type film" : vidéo H.264 lourde (CRF bas : gain x265 garanti), deux
 // pistes audio dont une volontairement décalée de 0,5 s (doit le rester),
 // sous-titres SRT "forcés", pièce jointe (comme une police ASS).
-function makeSourceMkv(target: string, videoCodec = "libx264", durationS = 5) {
+function makeSourceMkv(
+  target: string,
+  { videoCodec = "libx264", durationS = 5, crf = 8 }: { videoCodec?: string; durationS?: number; crf?: number } = {}
+) {
   const srt = path.join(fixtureDir, "subs.srt");
   fs.writeFileSync(
     srt,
@@ -66,7 +69,7 @@ function makeSourceMkv(target: string, videoCodec = "libx264", durationS = 5) {
     "-f", "lavfi", "-i", `sine=frequency=880:duration=${durationS}`,
     "-i", srt,
     "-map", "0", "-map", "1", "-map", "2", "-map", "3",
-    "-c:v", videoCodec, "-crf", "8", "-preset", "ultrafast",
+    "-c:v", videoCodec, "-crf", String(crf), "-preset", "ultrafast",
     ...(videoCodec === "libx265" ? ["-x265-params", "log-level=error"] : []),
     "-c:a:0", "aac", "-c:a:1", "libopus", "-c:s", "srt",
     "-metadata:s:a:0", "language=fre", "-metadata:s:a:1", "language=eng",
@@ -165,9 +168,9 @@ describe("optimizeVideo — ré-encode la vidéo en x265, recopie tout le reste 
     expect(fs.existsSync(path.join(fixtureDir, "serie_1.mkv.bkp"))).toBe(true);
   });
 
-  it("laisse intact un fichier déjà en HEVC (rien à gagner, perte de qualité assurée)", async () => {
+  it("laisse intact un fichier déjà en HEVC et déjà compact (rien à gagner)", async () => {
     const filePath = path.join(fixtureDir, "deja-hevc.mkv");
-    makeSourceMkv(filePath, "libx265");
+    makeSourceMkv(filePath, { videoCodec: "libx265", crf: 35 });
     const before = fs.readFileSync(filePath);
     const messages: string[] = [];
 
@@ -183,7 +186,49 @@ describe("optimizeVideo — ré-encode la vidéo en x265, recopie tout le reste 
     expect(result.optimizedSize).toBe(result.originalSize);
     expect(fs.readFileSync(filePath).equals(before)).toBe(true);
     expect(fs.existsSync(`${filePath}.bkp`)).toBe(false);
-    expect(messages.join("\n")).toContain("déjà en hevc");
+    expect(messages.join("\n")).toContain("déjà en hevc et déjà compact");
+  });
+
+  it("ré-encode un fichier déjà en HEVC mais encore lourd pour son type", async () => {
+    // ~1,4 Go/h attendus au plus pour un film : celui-ci est bien au-dessus.
+    const filePath = path.join(fixtureDir, "hevc-lourd.mkv");
+    makeSourceMkv(filePath, { videoCodec: "libx265", crf: 0 });
+    const sourceSize = fs.statSync(filePath).size;
+    const messages: string[] = [];
+
+    const result = await optimizeVideo({
+      filePath,
+      crf: 28,
+      preset: "ultrafast",
+      profile: "film",
+      keepSource: false,
+      onProgress: (m) => messages.push(m),
+    });
+
+    expect(messages.join("\n")).toContain("mais encore lourd");
+    expect(result.optimizedSize).toBeLessThan(sourceSize);
+    expect(probeStreams(filePath)[0].codec_name).toBe("hevc");
+  });
+
+  it("ne ré-encode jamais un fichier déjà produit par l'app (tag FILE_OPTIMIZER)", async () => {
+    const filePath = path.join(fixtureDir, "deux-passages.mkv");
+    makeSourceMkv(filePath, { videoCodec: "libx265", crf: 0 });
+    await optimizeVideo({ filePath, crf: 28, preset: "ultrafast", profile: "film", keepSource: false });
+    const afterFirst = fs.readFileSync(filePath);
+    const messages: string[] = [];
+
+    const second = await optimizeVideo({
+      filePath,
+      crf: 28,
+      preset: "ultrafast",
+      profile: "film",
+      keepSource: false,
+      onProgress: (m) => messages.push(m),
+    });
+
+    expect(second.optimizedSize).toBe(second.originalSize);
+    expect(fs.readFileSync(filePath).equals(afterFirst)).toBe(true);
+    expect(messages.join("\n")).toContain("déjà optimisé par file-optimizer");
   });
 
   it("échoue sans toucher au fichier s'il n'est pas une vidéo lisible", async () => {
@@ -420,7 +465,7 @@ describe("worker + scan en mode vidéo", () => {
     fs.mkdirSync(dir);
     const filePath = path.join(dir, "film.mkv");
     // Plus longue que les autres : l'encodage doit durer le temps de la pause.
-    makeSourceMkv(filePath, "libx264", 30);
+    makeSourceMkv(filePath, { durationS: 30 });
     const partPath = `${filePath}.part`;
 
     const res = await scanRoute.POST(

@@ -113,8 +113,14 @@ pile à 0).
   pistes audio copiées si lourdes (TrueHD...) que la cible est inatteignable
   sans dégrader franchement l'image — signalé dans le log. Le garde-fou
   "jamais plus gros qu'avant" s'applique aussi.
-- **Déjà en HEVC/AV1/VP9** : fichier laissé intact (rien à gagner, perte de
-  qualité assurée) — ce qui évite aussi de ré-encoder un MKV déjà traité.
+- **Déjà en HEVC/AV1/VP9** : laissé intact s'il est déjà compact pour son
+  type (un second encodage perdrait en qualité pour un gain faible) — film :
+  jusqu'à ~22 Mo par minute (~3 Mbit/s, ~1,4 Go par heure) ; série : sous le
+  plafond série. Au-dessus (ex: épisode HEVC de 1,7 Go pour 45 min), il est
+  ré-encodé comme les autres.
+- **Jamais ré-encodé deux fois** : chaque fichier produit porte le tag MKV
+  `FILE_OPTIMIZER` (réglages utilisés) ; un fichier qui le porte est
+  toujours laissé tel quel.
 - **Conserver la source** (désactivé par défaut) : la source est renommée en
   `film.mkv.bkp` à côté du résultat (`film_1.mkv.bkp` si une sauvegarde
   existe déjà). Sans cette option, la source est remplacée définitivement.

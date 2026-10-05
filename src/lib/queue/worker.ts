@@ -154,7 +154,12 @@ async function processJob(job: JobRow) {
     db.prepare(
       "UPDATE jobs SET original_size = ?, optimized_size = ?, file_path = ? WHERE id = ?"
     ).run(result.originalSize, result.optimizedSize, result.finalPath, job.id);
-    appendLog(job.id, `optimisé : ${result.originalSize} -> ${result.optimizedSize} octets`);
+    appendLog(
+      job.id,
+      result.optimizedSize === result.originalSize
+        ? `inchangé (${result.originalSize} octets)`
+        : `optimisé : ${result.originalSize} -> ${result.optimizedSize} octets`
+    );
     if (result.finalPath !== job.file_path) {
       appendLog(job.id, `converti en JPG : ${result.finalPath}`);
     }

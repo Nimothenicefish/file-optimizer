@@ -6,7 +6,9 @@ import readline from "node:readline";
 import {
   VIDEO_BACKUP_SUFFIX,
   VIDEO_PART_SUFFIX,
+  VIDEO_OPTIMIZED_TAG,
   VIDEO_SKIP_CODECS,
+  compactSizeLimit,
   type VideoProfile,
   videoTargetSize,
 } from "@/lib/videoSettings";
@@ -52,7 +54,7 @@ type ProbeStream = {
 
 export type Probe = {
   streams: ProbeStream[];
-  format: { duration?: string; start_time?: string };
+  format: { duration?: string; start_time?: string; tags?: Record<string, string> };
 };
 
 export type PacketStats = Map<number, { count: number; firstPts: number | null; lastPts: number | null }>;
@@ -349,11 +351,24 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
     throw new Error("Aucune piste vidéo dans ce fichier.");
   }
   const sourceCodecs = videoStreams.map((s) => s.codec_name ?? "?");
+  const unchanged = { originalSize, optimizedSize: originalSize, finalPath: filePath };
+  const previousRun = source.format.tags?.[VIDEO_OPTIMIZED_TAG];
+  if (previousRun) {
+    onProgress?.(`déjà optimisé par file-optimizer (${previousRun}) : fichier conservé tel quel`);
+    return unchanged;
+  }
   if (videoStreams.every((s) => VIDEO_SKIP_CODECS.has(s.codec_name ?? ""))) {
-    onProgress?.(
-      `déjà en ${sourceCodecs.join("/")} (au moins aussi efficace que x265) : fichier conservé tel quel`
-    );
-    return { originalSize, optimizedSize: originalSize, finalPath: filePath };
+    const compactLimit = compactSizeLimit(durationS, profile);
+    const sizes = `${Math.round(originalSize / 1e6)} Mo pour ${Math.round(durationS / 60)} min, seuil ${
+      profile === "series" ? "série" : "film"
+    } ${Math.round(compactLimit / 1e6)} Mo`;
+    if (originalSize <= compactLimit) {
+      onProgress?.(
+        `déjà en ${sourceCodecs.join("/")} et déjà compact (${sizes}) : fichier conservé tel quel`
+      );
+      return unchanged;
+    }
+    onProgress?.(`déjà en ${sourceCodecs.join("/")} mais encore lourd (${sizes}) : ré-encodé`);
   }
 
   const copiedBps = keptStreams(source)
@@ -439,6 +454,8 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
         // piste de sous-titres a de longs trous entre deux paquets.
         "-max_muxing_queue_size",
         "4096",
+        "-metadata",
+        `${VIDEO_OPTIMIZED_TAG}=x265 crf=${crf} preset=${preset} profil=${profile}`,
         "-progress",
         "pipe:1",
         "-nostats",

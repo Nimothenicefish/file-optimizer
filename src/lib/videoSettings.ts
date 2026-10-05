@@ -88,16 +88,36 @@ export const SERIES_BYTES_PER_MINUTE = 12 * MB;
 export function videoTargetSize(sourceSize: number, durationS: number, profile: VideoProfile): number {
   const ratioCap = sourceSize * VIDEO_TARGET_RATIO;
   if (profile === "film") return ratioCap;
-  const seriesCap = SERIES_BASE_BYTES + (SERIES_BYTES_PER_MINUTE * durationS) / 60;
-  return Math.min(ratioCap, seriesCap);
+  return Math.min(ratioCap, seriesSizeCap(durationS));
 }
 
-// Codecs vidéo déjà au moins aussi efficaces que x265 : les ré-encoder ne
-// ferait que perdre en qualité pour un gain de place négligeable (voire
-// nul). Un fichier dont toutes les pistes vidéo sont dans un de ces codecs
-// est laissé intact — c'est aussi ce qui évite de ré-encoder un MKV déjà
-// optimisé lors d'un précédent passage.
+function seriesSizeCap(durationS: number): number {
+  return SERIES_BASE_BYTES + (SERIES_BYTES_PER_MINUTE * durationS) / 60;
+}
+
+// Film déjà "compact" : ~22 Mo par minute (~3 Mbit/s en moyenne, audio
+// compris) — l'ordre de grandeur d'un film 1080p déjà bien encodé en x265.
+export const FILM_COMPACT_BYTES_PER_MINUTE = 22 * MB;
+
+// Taille en dessous de laquelle une vidéo DÉJÀ dans un codec efficace (voir
+// VIDEO_SKIP_CODECS) est laissée telle quelle : la ré-encoder ne ferait que
+// perdre en qualité pour un gain faible. Au-dessus (ex: épisode HEVC de
+// 1,7 Go pour 45 min, copie 4K de Blu-ray), elle est ré-encodée comme une
+// autre — le gain vaut alors la légère perte d'un second encodage.
+export function compactSizeLimit(durationS: number, profile: VideoProfile): number {
+  if (profile === "series") return seriesSizeCap(durationS);
+  return (FILM_COMPACT_BYTES_PER_MINUTE * durationS) / 60;
+}
+
+// Codecs vidéo déjà au moins aussi efficaces que x265 : un fichier dont
+// toutes les pistes vidéo sont dans un de ces codecs n'est ré-encodé que
+// s'il est encore lourd pour son type (voir compactSizeLimit).
 export const VIDEO_SKIP_CODECS = new Set(["hevc", "av1", "vp9"]);
+
+// Tag MKV global posé sur chaque fichier produit par cette app : un fichier
+// qui le porte n'est jamais ré-encodé (sans lui, un résultat encore au-dessus
+// du seuil "compact" serait re-compressé à chaque nouveau scan).
+export const VIDEO_OPTIMIZED_TAG = "FILE_OPTIMIZER";
 
 // Extension ajoutée à la source quand l'utilisateur choisit de la conserver
 // (film.mkv -> film.mkv.bkp, à côté du résultat). Hors VIDEO_EXT : jamais
