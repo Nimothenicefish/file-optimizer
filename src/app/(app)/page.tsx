@@ -15,6 +15,7 @@ import {
   Play,
   RefreshCw,
   ScanSearch,
+  SearchCheck,
   Sparkles,
   X,
 } from "lucide-react";
@@ -40,8 +41,10 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { BatchEstimate } from "@/lib/eta";
+import type { AnalysisItem, AnalysisResult } from "@/lib/videoAnalysis";
 import { formatRemaining, formatSize } from "@/lib/format";
 import {
+  AUTO_SERIES_MAX_DURATION_S,
   CRF_LEVELS,
   DEFAULT_VIDEO_CRF,
   DEFAULT_VIDEO_PRESET,
@@ -49,6 +52,8 @@ import {
   VIDEO_PRESETS,
   VIDEO_TARGET_RATIO,
   describeCrf,
+  isVideoPreset,
+  isVideoProfile,
   type VideoPreset,
   type VideoProfile,
 } from "@/lib/videoSettings";
@@ -70,7 +75,27 @@ const MODE_NOUN: Record<Mode, string> = { image: "photo(s)", video: "vidéo(s)" 
 const MODE_TAB_CLASS =
   "px-3 data-[state=active]:bg-primary/15 data-[state=active]:text-primary dark:data-[state=active]:text-primary";
 
-const PROFILE_LABEL: Record<VideoProfile, string> = { film: "Film", series: "Série (épisodes)" };
+const PROFILE_LABEL: Record<VideoProfile, string> = {
+  auto: "Auto (d'après la durée)",
+  film: "Film",
+  series: "Série (épisodes)",
+};
+
+const FILM_CAP_TEXT = `film : ${Math.round(VIDEO_TARGET_RATIO * 100)} % de la source (ex : 4 Go → 2,8 Go max)`;
+const SERIES_CAP_TEXT =
+  "série : d'après la durée de l'épisode (~440 Mo pour 20 min, ~800 Mo pour 50 min)";
+
+function profileCapText(profile: VideoProfile): string {
+  if (profile === "film") return `Taille finale plafonnée (${FILM_CAP_TEXT}).`;
+  if (profile === "series") {
+    return `Taille finale plafonnée (${SERIES_CAP_TEXT}), et jamais plus de ${Math.round(
+      VIDEO_TARGET_RATIO * 100
+    )} % de la source.`;
+  }
+  return `Type choisi pour chaque vidéo d'après sa durée : moins de ${
+    AUTO_SERIES_MAX_DURATION_S / 60
+  } min = épisode de série, sinon film. Taille finale plafonnée (${SERIES_CAP_TEXT} ; ${FILM_CAP_TEXT}).`;
+}
 
 type BatchJob = {
   id: string;
@@ -113,6 +138,68 @@ function storeBatch(ids: string[] | null) {
   }
 }
 
+// Derniers réglages utilisés, retrouvés à la visite suivante (même
+// navigateur). Simple confort : chaque valeur est revalidée à la lecture et
+// une valeur absente/invalide garde le réglage par défaut.
+const SETTINGS_STORAGE_KEY = "file-optimizer:settings";
+
+type StoredSettings = Partial<{
+  mode: Mode;
+  maxDimension: number;
+  quality: number;
+  keepOriginal: boolean;
+  forceJpeg: boolean;
+  videoCrf: number;
+  videoPreset: VideoPreset;
+  videoProfile: VideoProfile;
+  keepVideoSource: boolean;
+}>;
+
+function loadStoredSettings(): StoredSettings {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? "{}");
+    const intIn = (v: unknown, min: number, max: number) =>
+      Number.isInteger(v) && (v as number) >= min && (v as number) <= max ? (v as number) : undefined;
+    const bool = (v: unknown) => (typeof v === "boolean" ? v : undefined);
+    return {
+      mode: raw.mode === "image" || raw.mode === "video" ? raw.mode : undefined,
+      maxDimension: intIn(raw.maxDimension, 100, 20000),
+      quality: intIn(raw.quality, 1, 100),
+      keepOriginal: bool(raw.keepOriginal),
+      forceJpeg: bool(raw.forceJpeg),
+      videoCrf: intIn(raw.videoCrf, 0, 51),
+      videoPreset: isVideoPreset(raw.videoPreset) ? raw.videoPreset : undefined,
+      videoProfile: isVideoProfile(raw.videoProfile) ? raw.videoProfile : undefined,
+      keepVideoSource: bool(raw.keepVideoSource),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function storeSettings(settings: StoredSettings) {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // stockage indisponible (navigation privée...) : réglages non mémorisés
+  }
+}
+
+function analysisDecision(item: AnalysisItem): string {
+  switch (item.action) {
+    case "encode":
+      return `encodée (${item.sizeProfile === "series" ? "série" : "film"}, ≤ ${formatSize(
+        item.targetSize
+      )})`;
+    case "skip":
+      return "laissée telle quelle";
+    case "queued":
+      return "déjà en file";
+    default:
+      return "illisible";
+  }
+}
+
 function summaryLabel(summary: BatchSummary): string {
   const parts: string[] = [];
   if (summary.images > 0) parts.push(`${summary.images} photo(s)`);
@@ -152,6 +239,8 @@ export default function BrowsePage() {
   const [keepVideoSource, setKeepVideoSource] = useState(false);
 
   const [scanning, setScanning] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<(AnalysisResult & { path: string }) | null>(null);
   const [enqueuing, setEnqueuing] = useState(false);
 
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
@@ -301,6 +390,42 @@ export default function BrowsePage() {
     keepVideoSource,
   };
 
+  // Lecture une seule fois au montage (le stockage navigateur n'existe pas
+  // au rendu serveur), puis sauvegarde à chaque changement — jamais avant la
+  // lecture, sinon les valeurs par défaut écraseraient celles mémorisées.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  useEffect(() => {
+    const stored = loadStoredSettings();
+    /* eslint-disable react-hooks/set-state-in-effect -- lecture du stockage navigateur, indisponible au rendu serveur */
+    if (stored.mode) setMode(stored.mode);
+    if (stored.maxDimension != null) setMaxDimension(stored.maxDimension);
+    if (stored.quality != null) setQuality(stored.quality);
+    if (stored.keepOriginal != null) setKeepOriginal(stored.keepOriginal);
+    if (stored.forceJpeg != null) setForceJpeg(stored.forceJpeg);
+    if (stored.videoCrf != null) setVideoCrf(stored.videoCrf);
+    if (stored.videoPreset) setVideoPreset(stored.videoPreset);
+    if (stored.videoProfile) setVideoProfile(stored.videoProfile);
+    if (stored.keepVideoSource != null) setKeepVideoSource(stored.keepVideoSource);
+    setSettingsLoaded(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    if (settingsLoaded) storeSettings({ mode, ...settings });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    settingsLoaded,
+    mode,
+    maxDimension,
+    quality,
+    keepOriginal,
+    forceJpeg,
+    videoCrf,
+    videoPreset,
+    videoProfile,
+    keepVideoSource,
+  ]);
+
   async function scanFolder() {
     setScanning(true);
     try {
@@ -323,25 +448,58 @@ export default function BrowsePage() {
     }
   }
 
+  // Analyse préalable (vidéos) : ce qui serait encodé/ignoré, gain minimum,
+  // durée estimée — rien n'est mis en file avant confirmation.
+  async function analyzeFolder() {
+    setAnalyzing(true);
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, videoProfile }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error("Échec de l'analyse", { description: data.error });
+        return;
+      }
+      setAnalysis({ ...data, path });
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function launchAnalyzed() {
+    if (!analysis) return;
+    const paths = analysis.items.filter((i) => i.action === "encode").map((i) => i.path);
+    setAnalysis(null);
+    await enqueuePaths(paths);
+  }
+
   async function optimizeSelection() {
     if (selected.size === 0) return;
+    if (await enqueuePaths([...selected])) setSelected(new Set());
+  }
+
+  async function enqueuePaths(paths: string[]): Promise<boolean> {
+    if (paths.length === 0) return false;
     setEnqueuing(true);
     try {
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paths: [...selected], ...settings }),
+        body: JSON.stringify({ paths, ...settings }),
       });
       const data = await res.json();
       if (!res.ok) {
         toast.error("Échec de la mise en file", { description: data.error });
-        return;
+        return false;
       }
       const parts = [`${data.queued} mise(s) en file`];
       if (data.skippedAlreadyQueued > 0) parts.push(`${data.skippedAlreadyQueued} déjà en file`);
       toast.success(parts.join(", "));
       startBatch(data.ids ?? []);
-      setSelected(new Set());
+      return true;
     } finally {
       setEnqueuing(false);
     }
@@ -470,9 +628,7 @@ export default function BrowsePage() {
             Seule la piste vidéo est ré-encodée en x265 : toutes les pistes audio, sous-titres,
             chapitres et polices sont recopiés à l&apos;identique, avec leurs horodatages d&apos;origine
             (vérifiés après encodage — au moindre écart, la source n&apos;est pas touchée).{" "}
-            {videoProfile === "film"
-              ? `Taille finale plafonnée à ${Math.round(VIDEO_TARGET_RATIO * 100)} % de la source (ex : 4 Go → 2,8 Go max).`
-              : `Taille finale plafonnée d'après la durée de l'épisode (~440 Mo pour 20 min, ~800 Mo pour 50 min), et jamais plus de ${Math.round(VIDEO_TARGET_RATIO * 100)} % de la source.`}{" "}
+            {profileCapText(videoProfile)}{" "}
             Un fichier déjà en HEVC/AV1/VP9 n&apos;est ré-encodé que s&apos;il est encore lourd pour
             son type (film : plus de ~1,4 Go par heure ; série : au-dessus du plafond), et jamais un
             fichier déjà produit par l&apos;app. L&apos;encodage tourne en priorité
@@ -570,6 +726,12 @@ export default function BrowsePage() {
           <ScanSearch className="size-4" />
           {scanning ? "Scan en cours…" : "Scanner ce dossier (récursif)"}
         </Button>
+        {mode === "video" && (
+          <Button onClick={analyzeFolder} disabled={analyzing} variant="outline" className="gap-1.5">
+            {analyzing ? <Loader2 className="size-4 animate-spin" /> : <SearchCheck className="size-4" />}
+            {analyzing ? "Analyse en cours…" : "Analyser ce dossier"}
+          </Button>
+        )}
         <Button onClick={selectAllHere} variant="outline">
           Sélectionner les {mode === "video" ? "vidéos" : "photos"} de ce dossier
         </Button>
@@ -704,6 +866,96 @@ export default function BrowsePage() {
           </div>
         </div>
       )}
+
+      <Dialog open={analysis != null} onOpenChange={(open) => !open && setAnalysis(null)}>
+        <DialogContent className="max-h-[85vh] grid-cols-1 overflow-hidden sm:max-w-3xl">
+          <DialogHeader className="min-w-0">
+            <DialogTitle className="flex items-center gap-2">
+              <SearchCheck className="size-5 text-primary" />
+              Analyse de « {analysis?.path || "Racine"} »
+            </DialogTitle>
+            <DialogDescription>
+              {analysis?.items.length ?? 0} vidéo(s) trouvée(s) — rien n&apos;est lancé tant que tu ne
+              confirmes pas.
+            </DialogDescription>
+          </DialogHeader>
+          {analysis && (
+            <>
+              <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <div className="panel p-3">
+                  <p className="text-xs text-muted-foreground">À encoder</p>
+                  <p className="text-lg font-semibold">{analysis.toEncode}</p>
+                </div>
+                <div className="panel p-3">
+                  <p className="text-xs text-muted-foreground">Taille actuelle</p>
+                  <p className="text-lg font-semibold">{formatSize(analysis.encodeBytes)}</p>
+                </div>
+                <div className="rounded-xl border border-primary/30 bg-primary/10 p-3">
+                  <p className="text-xs text-muted-foreground">Place libérée (au moins)</p>
+                  <p className="text-lg font-semibold text-primary">
+                    {formatSize(analysis.minSavedBytes)}
+                  </p>
+                </div>
+                <div className="panel p-3">
+                  <p className="text-xs text-muted-foreground">Durée estimée</p>
+                  <p className="text-lg font-semibold">
+                    {analysis.estimatedMs == null
+                      ? "inconnue"
+                      : analysis.estimatedMs === 0
+                        ? "—"
+                        : formatRemaining(analysis.estimatedMs)}
+                  </p>
+                </div>
+              </div>
+              {analysis.estimatedMs == null && analysis.toEncode > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Durée estimée disponible après un premier encodage vidéo (vitesse mesurée sur ce
+                  NAS).
+                </p>
+              )}
+              <div className="min-w-0 max-h-[40vh] overflow-y-auto rounded-lg border">
+                <table className="w-full table-fixed text-xs">
+                  <thead className="sticky top-0 bg-popover text-left text-muted-foreground">
+                    <tr className="border-b">
+                      <th className="px-3 py-2 font-medium">Fichier</th>
+                      <th className="w-20 px-3 py-2 font-medium">Durée</th>
+                      <th className="w-20 px-3 py-2 font-medium">Taille</th>
+                      <th className="w-32 px-3 py-2 font-medium">Décision</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analysis.items.map((item) => (
+                      <tr key={item.path} className="border-b border-border/60 align-top last:border-0">
+                        <td className="px-3 py-2 break-all">
+                          {item.path}
+                          {item.reason && (
+                            <span className="mt-0.5 block break-words text-muted-foreground">
+                              {item.reason}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {item.durationS != null ? `${Math.round(item.durationS / 60)} min` : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{formatSize(item.size)}</td>
+                        <td className="px-3 py-2">{analysisDecision(item)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" onClick={() => setAnalysis(null)}>
+                  Fermer
+                </Button>
+                <Button onClick={launchAnalyzed} disabled={analysis.toEncode === 0 || enqueuing}>
+                  Lancer l&apos;optimisation ({analysis.toEncode})
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={summary != null} onOpenChange={(open) => !open && setSummary(null)}>
         <DialogContent className="max-w-md">

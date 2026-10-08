@@ -8,7 +8,9 @@ import {
   VIDEO_PART_SUFFIX,
   VIDEO_OPTIMIZED_TAG,
   VIDEO_SKIP_CODECS,
+  type SizeProfile,
   compactSizeLimit,
+  resolveSizeProfile,
   type VideoProfile,
   videoTargetSize,
 } from "@/lib/videoSettings";
@@ -153,7 +155,7 @@ function runProcess(
   });
 }
 
-async function probe(filePath: string, ctl?: ProcessControl): Promise<Probe> {
+export async function probe(filePath: string, ctl?: ProcessControl): Promise<Probe> {
   let json = "";
   await runProcess(
     "ffprobe",
@@ -333,6 +335,60 @@ export function partPathFor(filePath: string): string {
 // source ne démarre pas pile à 0 (quelques ms d'écart mesurées). Le
 // résultat est vérifié (pistes, nombre de paquets, horodatages, durée)
 // AVANT de toucher à la source : au moindre écart, la source reste intacte.
+export type VideoPlan = {
+  durationS: number;
+  // Profil effectivement appliqué ("auto" résolu d'après la durée).
+  sizeProfile: SizeProfile;
+  codecs: string[];
+  // Taille maximale visée si encodé (voir videoTargetSize).
+  targetSize: number;
+} & ({ action: "skip"; reason: string } | { action: "encode"; note: string | null });
+
+const PROFILE_LABEL: Record<SizeProfile, string> = { film: "film", series: "série" };
+
+// Décide si une vidéo doit être ré-encodée, et avec quel plafond — partagé
+// par l'encodage lui-même et l'analyse préalable d'un dossier (voir
+// src/lib/videoAnalysis.ts), qui annonce donc exactement ce que fera
+// l'encodage. Lève une erreur si le fichier n'est pas une vidéo exploitable.
+export function planVideo(source: Probe, originalSize: number, profile: VideoProfile): VideoPlan {
+  const durationS = Number(source.format.duration);
+  if (!Number.isFinite(durationS) || durationS <= 0) {
+    throw new Error("Durée de la vidéo illisible (fichier corrompu ?)");
+  }
+  const videoStreams = source.streams.filter(isMainVideo);
+  if (videoStreams.length === 0) {
+    throw new Error("Aucune piste vidéo dans ce fichier.");
+  }
+  const sizeProfile = resolveSizeProfile(profile, durationS);
+  const codecs = videoStreams.map((s) => s.codec_name ?? "?");
+  const base = {
+    durationS,
+    sizeProfile,
+    codecs,
+    targetSize: videoTargetSize(originalSize, durationS, sizeProfile),
+  };
+
+  const previousRun = source.format.tags?.[VIDEO_OPTIMIZED_TAG];
+  if (previousRun) {
+    return { ...base, action: "skip", reason: `déjà optimisé par file-optimizer (${previousRun})` };
+  }
+  if (videoStreams.every((s) => VIDEO_SKIP_CODECS.has(s.codec_name ?? ""))) {
+    const compactLimit = compactSizeLimit(durationS, sizeProfile);
+    const sizes = `${Math.round(originalSize / 1e6)} Mo pour ${Math.round(durationS / 60)} min, seuil ${
+      PROFILE_LABEL[sizeProfile]
+    } ${Math.round(compactLimit / 1e6)} Mo`;
+    if (originalSize <= compactLimit) {
+      return {
+        ...base,
+        action: "skip",
+        reason: `déjà en ${codecs.join("/")} et déjà compact (${sizes})`,
+      };
+    }
+    return { ...base, action: "encode", note: `déjà en ${codecs.join("/")} mais encore lourd (${sizes})` };
+  }
+  return { ...base, action: "encode", note: null };
+}
+
 export async function optimizeVideo(params: OptimizeVideoParams): Promise<OptimizeVideoResult> {
   const { filePath, crf, preset, profile, keepSource, onProgress, onPercent, signal, onProcess } =
     params;
@@ -340,41 +396,25 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
   const originalSize = fs.statSync(filePath).size;
 
   const source = await probe(filePath, ctl);
-  const durationS = Number(source.format.duration);
-  if (!Number.isFinite(durationS) || durationS <= 0) {
-    throw new Error("Durée de la vidéo illisible (fichier corrompu ?)");
-  }
+  const plan = planVideo(source, originalSize, profile);
+  const { durationS, sizeProfile, targetSize } = plan;
+  const sourceCodecs = plan.codecs;
   const startS = Number(source.format.start_time) || 0;
-
   const videoStreams = source.streams.filter(isMainVideo);
-  if (videoStreams.length === 0) {
-    throw new Error("Aucune piste vidéo dans ce fichier.");
+  if (profile === "auto") {
+    onProgress?.(
+      `type de vidéo automatique : ${PROFILE_LABEL[sizeProfile]} (${Math.round(durationS / 60)} min)`
+    );
   }
-  const sourceCodecs = videoStreams.map((s) => s.codec_name ?? "?");
-  const unchanged = { originalSize, optimizedSize: originalSize, finalPath: filePath };
-  const previousRun = source.format.tags?.[VIDEO_OPTIMIZED_TAG];
-  if (previousRun) {
-    onProgress?.(`déjà optimisé par file-optimizer (${previousRun}) : fichier conservé tel quel`);
-    return unchanged;
+  if (plan.action === "skip") {
+    onProgress?.(`${plan.reason} : fichier conservé tel quel`);
+    return { originalSize, optimizedSize: originalSize, finalPath: filePath };
   }
-  if (videoStreams.every((s) => VIDEO_SKIP_CODECS.has(s.codec_name ?? ""))) {
-    const compactLimit = compactSizeLimit(durationS, profile);
-    const sizes = `${Math.round(originalSize / 1e6)} Mo pour ${Math.round(durationS / 60)} min, seuil ${
-      profile === "series" ? "série" : "film"
-    } ${Math.round(compactLimit / 1e6)} Mo`;
-    if (originalSize <= compactLimit) {
-      onProgress?.(
-        `déjà en ${sourceCodecs.join("/")} et déjà compact (${sizes}) : fichier conservé tel quel`
-      );
-      return unchanged;
-    }
-    onProgress?.(`déjà en ${sourceCodecs.join("/")} mais encore lourd (${sizes}) : ré-encodé`);
-  }
+  if (plan.note) onProgress?.(`${plan.note} : ré-encodé`);
 
   const copiedBps = keptStreams(source)
     .filter((s) => !isMainVideo(s))
     .reduce((sum, s) => sum + (streamBitrate(s) ?? (s.codec_type === "audio" ? UNKNOWN_AUDIO_BPS : 0)), 0);
-  const targetSize = videoTargetSize(originalSize, durationS, profile);
   const maxrateBps = computeVideoMaxrate(targetSize, durationS, copiedBps);
   const maxrateK = Math.round(maxrateBps / 1000);
 
@@ -403,7 +443,7 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
     .join(", ");
   onProgress?.(`pistes : ${streamSummary}`);
   onProgress?.(
-    `encodage x265 (profil ${profile}, CRF ${crf}, preset ${preset}, vidéo ${sourceCodecs.join("/")} -> hevc, débit max ${maxrateK} kb/s pour viser ${Math.round(
+    `encodage x265 (profil ${sizeProfile}, CRF ${crf}, preset ${preset}, vidéo ${sourceCodecs.join("/")} -> hevc, débit max ${maxrateK} kb/s pour viser ${Math.round(
       targetSize / 1e6
     )} Mo au plus), autres pistes copiées telles quelles`
   );
@@ -455,7 +495,7 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
         "-max_muxing_queue_size",
         "4096",
         "-metadata",
-        `${VIDEO_OPTIMIZED_TAG}=x265 crf=${crf} preset=${preset} profil=${profile}`,
+        `${VIDEO_OPTIMIZED_TAG}=x265 crf=${crf} preset=${preset} profil=${sizeProfile}`,
         "-progress",
         "pipe:1",
         "-nostats",

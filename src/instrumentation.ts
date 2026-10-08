@@ -10,6 +10,14 @@ export async function register() {
     const sharp = (await import("sharp")).default;
     sharp.concurrency(1);
 
+    const { dataPersistence } = await import("@/lib/persistence");
+    const persistence = dataPersistence();
+    if (!persistence.ok) {
+      console.warn(
+        `ATTENTION : base de données non conservée (${persistence.reason}) — monte un dossier du NAS sur /data.`
+      );
+    }
+
     const { startWorker } = await import("@/lib/queue/worker");
     startWorker();
   }

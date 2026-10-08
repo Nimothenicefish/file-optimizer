@@ -18,6 +18,9 @@ let cancelRoute: typeof import("@/app/api/jobs/cancel/route");
 let setQueuePaused: typeof import("@/lib/queueSettings").setQueuePaused;
 let recoverInterruptedJobs: typeof import("@/lib/queue/worker").recoverInterruptedJobs;
 let fixtureDir: string;
+let planVideo: typeof import("@/lib/pipeline/optimizeVideo").planVideo;
+let resolveSizeProfile: typeof import("@/lib/videoSettings").resolveSizeProfile;
+let analyzeVideos: typeof import("@/lib/videoAnalysis").analyzeVideos;
 
 type ProbeStream = {
   index: number;
@@ -88,6 +91,9 @@ beforeAll(async () => {
     "@/lib/pipeline/optimizeVideo"
   ));
   ({ recoverInterruptedJobs } = await import("@/lib/queue/worker"));
+  ({ planVideo } = await import("@/lib/pipeline/optimizeVideo"));
+  ({ resolveSizeProfile } = await import("@/lib/videoSettings"));
+  ({ analyzeVideos } = await import("@/lib/videoAnalysis"));
   ({ videoTargetSize, describeCrf, DEFAULT_VIDEO_CRF } = await import("@/lib/videoSettings"));
   scanRoute = await import("@/app/api/scan/route");
   cancelRoute = await import("@/app/api/jobs/cancel/route");
@@ -374,6 +380,57 @@ describe("verifyOutput — ne tolère qu'un décalage commun à toutes les piste
     expect(verifyOutput(probe("h264"), probe("hevc"), packets([0, 0, 0]), lost).join()).toContain(
       "paquet"
     );
+  });
+});
+
+describe("type de vidéo automatique (d'après la durée)", () => {
+  it("épisode sous 70 min, film au-delà ; un type choisi explicitement est respecté", () => {
+    expect(resolveSizeProfile("auto", 22 * 60)).toBe("series");
+    expect(resolveSizeProfile("auto", 69 * 60)).toBe("series");
+    expect(resolveSizeProfile("auto", 70 * 60)).toBe("film");
+    expect(resolveSizeProfile("film", 22 * 60)).toBe("film");
+    expect(resolveSizeProfile("series", 3 * 3600)).toBe("series");
+  });
+
+  it("planVideo applique le plafond du type résolu (épisode HEVC trop lourd -> série)", () => {
+    const MB = 1024 * 1024;
+    const episode = {
+      format: { duration: String(45 * 60) },
+      streams: [{ index: 0, codec_type: "video", codec_name: "hevc" }],
+    };
+    const plan = planVideo(episode, 1700 * MB, "auto");
+    expect(plan).toMatchObject({ action: "encode", sizeProfile: "series" });
+    // 200 Mo + 12 Mo/min x 45 min.
+    expect(plan.targetSize).toBe(740 * MB);
+  });
+});
+
+describe("analyzeVideos — analyse d'un dossier sans rien lancer", () => {
+  it("annonce ce qui serait encodé, ignoré ou illisible, et le gain minimum", async () => {
+    const dir = path.join(photosDir, "analyse");
+    fs.mkdirSync(dir);
+    makeSourceMkv(path.join(dir, "a-encoder.mkv"));
+    makeSourceMkv(path.join(dir, "deja-compact.mkv"), { videoCodec: "libx265", crf: 35 });
+    fs.writeFileSync(path.join(dir, "corrompu.mkv"), "pas une vidéo");
+    const before = fs.readdirSync(dir).map((f) => [f, fs.statSync(path.join(dir, f)).size]);
+
+    const result = await analyzeVideos("analyse", "film");
+
+    const byName = Object.fromEntries(result.items.map((i) => [path.basename(i.path), i]));
+    expect(byName["a-encoder.mkv"]).toMatchObject({ action: "encode", sizeProfile: "film" });
+    expect(byName["deja-compact.mkv"].action).toBe("skip");
+    expect(byName["corrompu.mkv"].action).toBe("error");
+    expect(result.toEncode).toBe(1);
+    const encodeSize = byName["a-encoder.mkv"].size;
+    expect(result.encodeBytes).toBe(encodeSize);
+    // Film : plafond à 70 % -> au moins 30 % libérés.
+    expect(result.minSavedBytes).toBeCloseTo(encodeSize * 0.3, -1);
+    // Rien n'a été modifié ni mis en file.
+    expect(fs.readdirSync(dir).map((f) => [f, fs.statSync(path.join(dir, f)).size])).toEqual(before);
+    const queued = db
+      .prepare("SELECT COUNT(*) AS c FROM jobs WHERE file_path LIKE ?")
+      .get(`${dir}%`) as { c: number };
+    expect(queued.c).toBe(0);
   });
 });
 

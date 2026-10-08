@@ -90,6 +90,17 @@ function createDb() {
       paused INTEGER NOT NULL DEFAULT 0
     );
 
+    -- Bilan cumulé par type de média (voir src/lib/stats.ts) : mis à jour à
+    -- chaque job terminé, indépendant de l'historique des jobs — supprimer
+    -- les jobs terminés ne fait pas perdre le total d'espace gagné.
+    CREATE TABLE IF NOT EXISTS stats (
+      kind TEXT PRIMARY KEY,
+      processed INTEGER NOT NULL DEFAULT 0,
+      optimized INTEGER NOT NULL DEFAULT 0,
+      original_bytes INTEGER NOT NULL DEFAULT 0,
+      saved_bytes INTEGER NOT NULL DEFAULT 0
+    );
+
     CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_jobs_file_path ON jobs(file_path);
   `);
@@ -113,6 +124,25 @@ function createDb() {
     .run();
 
   instance.prepare("INSERT OR IGNORE INTO queue_settings (id, paused) VALUES (1, 0)").run();
+
+  // Base déployée avant l'ajout du bilan : initialisé une seule fois (table
+  // vide) à partir des jobs terminés encore présents.
+  const statsEmpty =
+    (instance.prepare("SELECT COUNT(*) AS c FROM stats").get() as { c: number }).c === 0;
+  if (statsEmpty) {
+    instance.exec(`
+      INSERT INTO stats (kind, processed, optimized, original_bytes, saved_bytes)
+      SELECT k.kind,
+             COUNT(j.id),
+             COALESCE(SUM(j.optimized_size < j.original_size), 0),
+             COALESCE(SUM(CASE WHEN j.optimized_size < j.original_size THEN j.original_size END), 0),
+             COALESCE(SUM(CASE WHEN j.optimized_size < j.original_size
+                               THEN j.original_size - j.optimized_size END), 0)
+      FROM (SELECT 'image' AS kind UNION ALL SELECT 'video') k
+      LEFT JOIN jobs j ON j.kind = k.kind AND j.status = 'done'
+      GROUP BY k.kind
+    `);
+  }
 
   return instance;
 }

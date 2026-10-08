@@ -22,19 +22,35 @@ authentification par session, Docker.
     qualité (JPEG/WebP/AVIF ; un PNG est toujours recompressé sans perte,
     indépendamment de ce réglage), conservation des originaux, conversion
     forcée en JPG (désactivée par défaut).
+  - **Analyser ce dossier** (mode vidéo) : avant de lancer quoi que ce soit,
+    liste chaque MKV avec la décision que prendrait l'encodage (ré-encodée,
+    laissée telle quelle, illisible, déjà en file), la place libérée **au
+    minimum** (plafonds de taille) et la durée estimée (vitesse mesurée sur
+    les encodages précédents de ce NAS) — puis lance seulement les vidéos à
+    encoder. Lecture des métadonnées seule (ffprobe), fichier par fichier,
+    en priorité minimale : rien n'est modifié.
+  - Les derniers réglages utilisés (mode, qualité, CRF, preset, type de
+    vidéo, options) sont retrouvés à la visite suivante (même navigateur).
 - **Traitements** (`/jobs`) : liste des jobs (un job = un fichier, avec
   l'avancement en % pendant l'encodage d'une vidéo), filtrable
   par statut, avec détails (log, taille avant/après) et actions groupées
   (annuler les jobs sélectionnés, supprimer tous les jobs en
-  attente/terminés).
+  attente/terminés/annulés, ou un job précis).
+  - **Bilan** : espace gagné au total, par type (photos/vidéos), nombre de
+    fichiers réduits et gain moyen — cumulé à part (table `stats`), il
+    survit à la suppression des jobs terminés.
   - **Pause** : aucun nouveau job ne démarre, et une vidéo en cours
     d'encodage est **gelée** (process ffmpeg suspendu) puis reprise là où
     elle en était — rien n'est perdu ni réécrit, la vérification finale
     habituelle s'applique toujours. ffmpeg garde sa mémoire pendant la pause
     (CPU à 0). Une photo en cours n'est pas gelée (traitée dans l'app
-    elle-même, en quelques secondes) : elle se termine. Un redémarrage du
-    conteneur pendant la pause fait perdre l'encodage en cours (job en
-    erreur, source intacte).
+    elle-même, en quelques secondes) : elle se termine.
+  - **Arrêt du conteneur** (mise à jour, `docker stop`, redémarrage du NAS) :
+    le job en cours est interrompu proprement et **remis en attente** ; il
+    reprend tout seul au démarrage suivant (depuis le début pour une vidéo :
+    ffmpeg ne sait pas reprendre un encodage à moitié fait). Seul un
+    plantage (mémoire saturée...) le laisse en erreur, pour ne jamais
+    relancer en boucle une vidéo qui ferait planter le conteneur.
   - **Avancement et temps restant** : % et temps restant estimé pour la
     vidéo en cours (sur /jobs) et pour le lot entier (barre sur Parcourir,
     qui reprend après un rafraîchissement). Estimation d'après la vitesse
@@ -103,7 +119,9 @@ pile à 0).
   source reste intacte (job en erreur, détail dans le log).
 - **Taille** : le CRF (22 par défaut) décide de la qualité ; le débit vidéo
   est en plus plafonné pour que le fichier final ne dépasse pas une taille
-  maximale, selon le **type de vidéo** choisi :
+  maximale, selon le **type de vidéo** choisi (**Auto** par défaut : moins
+  de 70 min = épisode de série, sinon film — un dossier mixte se scanne
+  d'un coup) :
   - **Film** : 70 % de la source (4 Go → 2,8 Go max, souvent bien moins) ;
   - **Série (épisodes)** : 200 Mo + 12 Mo par minute (~440 Mo pour un
     épisode de 20 min, ~800 Mo pour 50 min), et jamais plus de 70 % de la
@@ -136,6 +154,18 @@ pile à 0).
   heures par film sur un seul cœur ; le preset `fast`/`faster` va plus vite
   au prix d'un fichier un peu plus gros. Les métadonnées HDR10 statiques et
   Dolby Vision ne sont pas garanties : éviter ce mode sur des sources HDR.
+
+### Sauvegardes (`/backups`)
+
+Les sauvegardes laissées par l'app — sources vidéo `film.mkv.bkp` et
+originaux photo des dossiers `origin/` — occupent encore la place "gagnée"
+tant qu'elles existent. La page les liste toutes (bibliothèque entière, les
+plus lourdes en premier) avec leur fichier optimisé, et permet de supprimer
+celles déjà vérifiées. Garde-fous, revérifiés côté serveur à chaque
+suppression : seul un fichier de sauvegarde de l'app peut être supprimé
+(jamais un fichier quelconque ni la version optimisée), et une sauvegarde
+dont le fichier optimisé est introuvable — la seule copie restante — ne
+l'est jamais. Un dossier `origin/` vidé est supprimé.
 
 ### Protection mémoire (shrink-on-load)
 
@@ -219,6 +249,13 @@ docker compose up -d
 
 Une mise à jour se fait avec les deux mêmes commandes après un nouveau push
 sur `main`.
+
+**Volume `/data`** : la base (jobs, pause, bilan) vit dans `/data` — y
+monter un dossier du NAS (ex: `/volume1/docker/file-optimizer/data:/data`).
+Monté ailleurs (ex: sur `/app/data`), Docker crée à la place un volume
+anonyme, perdu à chaque recréation du conteneur : l'app le détecte et
+affiche alors un bandeau d'avertissement sur toutes les pages (et un
+message dans les logs du conteneur).
 
 **Limites de ressources** : `docker-compose.yml` fixe des limites dures
 (`mem_limit`/`memswap_limit`/`cpuset`/`pids_limit`), reprises du réglage déjà

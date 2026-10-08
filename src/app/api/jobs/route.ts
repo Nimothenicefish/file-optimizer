@@ -6,6 +6,7 @@ import { parseOptimizeSettings, toEnqueueParams } from "@/lib/optimizeSettings";
 import { InvalidPathError, mediaKind, resolvePhotoPath } from "@/lib/photoBrowse";
 import { enqueueFiles } from "@/lib/queue/worker";
 import { isQueuePaused } from "@/lib/queueSettings";
+import { getStats } from "@/lib/stats";
 
 function fileSize(filePath: string): number | null {
   try {
@@ -73,7 +74,15 @@ export async function GET(req: Request) {
   };
   for (const row of statusCountRows) statusCounts[row.status] = row.count;
 
-  return NextResponse.json({ jobs, total, page, pageSize, statusCounts, paused: isQueuePaused() });
+  return NextResponse.json({
+    jobs,
+    total,
+    page,
+    pageSize,
+    statusCounts,
+    paused: isQueuePaused(),
+    stats: getStats(),
+  });
 }
 
 // Met en file une sélection manuelle de fichiers (chemins relatifs à

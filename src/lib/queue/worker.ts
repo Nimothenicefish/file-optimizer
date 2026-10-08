@@ -5,6 +5,7 @@ import { optimizeImage } from "@/lib/pipeline/optimizeImage";
 import { optimizeVideo, partPathFor } from "@/lib/pipeline/optimizeVideo";
 import { isCancelRequested } from "@/lib/queue/jobs";
 import { isQueuePaused } from "@/lib/queueSettings";
+import { recordJobStats } from "@/lib/stats";
 import {
   DEFAULT_VIDEO_CRF,
   DEFAULT_VIDEO_PRESET,
@@ -130,12 +131,21 @@ function setStatus(jobId: string, status: string, error?: string) {
   ).run(status, error ?? null, Date.now(), jobId);
 }
 
+// Job en cours de traitement (un seul à la fois), pour la remise en attente
+// sur arrêt du conteneur (voir requeueOnShutdown).
+let current: { job: JobRow; controller: AbortController } | null = null;
+// Arrêt du conteneur en cours : plus aucun job ne démarre, et celui qui
+// s'interrompt ne se marque pas lui-même en erreur/annulé (il vient d'être
+// remis en attente).
+let shuttingDown = false;
+
 async function processJob(job: JobRow) {
   db.prepare(
     "UPDATE jobs SET status = 'running', started_at = ?, updated_at = datetime('now') WHERE id = ?"
   ).run(Date.now(), job.id);
 
   const controller = new AbortController();
+  current = { job, controller };
   const freezer = new VideoFreezer(job.id);
   const supervise = setInterval(() => {
     // Annulation possible même pendant une pause : SIGKILL arrête aussi un
@@ -150,6 +160,7 @@ async function processJob(job: JobRow) {
     }
 
     const result = await runOptimization(job, controller.signal, freezer);
+    if (shuttingDown) return;
 
     db.prepare(
       "UPDATE jobs SET original_size = ?, optimized_size = ?, file_path = ? WHERE id = ?"
@@ -164,7 +175,9 @@ async function processJob(job: JobRow) {
       appendLog(job.id, `converti en JPG : ${result.finalPath}`);
     }
     setStatus(job.id, "done");
+    recordJobStats(job.kind === "video" ? "video" : "image", result.originalSize, result.optimizedSize);
   } catch (err) {
+    if (shuttingDown) return;
     if (controller.signal.aborted) {
       appendLog(job.id, "ANNULÉ : traitement interrompu à la demande, fichier d'origine intact.");
       setStatus(job.id, "cancelled");
@@ -175,14 +188,43 @@ async function processJob(job: JobRow) {
     setStatus(job.id, "error", message);
   } finally {
     clearInterval(supervise);
-    freezer.endPause();
+    if (!shuttingDown) freezer.endPause();
+    current = null;
   }
+}
+
+// Arrêt propre du conteneur (SIGTERM : déploiement, docker stop, redémarrage
+// du NAS) : le job en cours est interrompu (ffmpeg tué, photo abandonnée
+// avant écriture — voir les signal d'annulation des pipelines) et remis en
+// attente, pour reprendre automatiquement au démarrage suivant — depuis le
+// début pour une vidéo (ffmpeg ne sait pas reprendre un encodage à moitié
+// fait). Synchrone : s'exécute entièrement avant que Next ne quitte. Un
+// plantage (mémoire saturée : SIGKILL, aucun gestionnaire) laisse lui le job
+// "running", passé en erreur au démarrage (voir recoverInterruptedJobs) —
+// pour ne jamais relancer en boucle une vidéo qui fait planter le conteneur.
+export function requeueOnShutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (!current) return;
+  const { job, controller } = current;
+  controller.abort();
+  const partPath = partPathFor(job.file_path);
+  if (job.kind === "video" && fs.existsSync(partPath)) fs.unlinkSync(partPath);
+  db.prepare(
+    `UPDATE jobs SET status = 'pending', started_at = NULL, progress = NULL, paused_at = NULL,
+                     paused_ms = 0, cancel_requested = 0, updated_at = datetime('now')
+     WHERE id = ? AND status = 'running'`
+  ).run(job.id);
+  appendLog(
+    job.id,
+    "remis en attente : arrêt du conteneur (reprendra depuis le début au prochain démarrage)"
+  );
 }
 
 let running = false;
 
 async function tick() {
-  if (running) return;
+  if (running || shuttingDown) return;
   // Un job déjà "running" continue : la pause ne fait qu'empêcher d'en
   // DÉMARRER un nouveau (pour l'interrompre, l'annuler — voir cancelJobs).
   if (isQueuePaused()) return;
@@ -235,6 +277,17 @@ export function startWorker() {
   if (globalThis.__queueStarted__) return;
   globalThis.__queueStarted__ = true;
   recoverInterruptedJobs();
+  // Gestionnaires synchrones, appelés avant la sortie (asynchrone) de Next
+  // sur ces mêmes signaux.
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, () => {
+      requeueOnShutdown();
+      // Écouter un signal désactive la terminaison par défaut de Node : sans
+      // autre écouteur (process sans serveur Next, ex: tests), on quitte nous-
+      // mêmes avec le code standard (128 + numéro du signal).
+      if (process.listenerCount(signal) === 1) process.exit(signal === "SIGTERM" ? 143 : 130);
+    });
+  }
   setInterval(() => {
     tick().catch((err) => console.error("Erreur worker:", err));
   }, 1000);

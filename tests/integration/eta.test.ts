@@ -81,12 +81,15 @@ describe("estimateBatch — avancement et temps restant d'un lot", () => {
     expect(batch.percent).toBeCloseTo(16.67, 1);
   });
 
-  it("ignore une vidéo déjà en HEVC (terminée en quelques secondes) pour mesurer la vitesse", () => {
-    const jobs = [
-      job({ kind: "video", status: "done", original_size: 5_000, started_at: NOW - 5_000, finished_at: NOW - 2_000 }),
-      job({ kind: "video", file_path: "/suivante" }),
-    ];
-    expect(estimateBatch(jobs, NOW, () => 5_000).remainingMs).toBeNull();
+  it("mesure la vitesse sur les vidéos réellement encodées, même rapides, jamais sur celles laissées telles quelles", () => {
+    const skipped = job({ kind: "video", status: "done", original_size: 5_000, started_at: NOW - 5_000, finished_at: NOW - 2_000 });
+    const pendingNext = job({ kind: "video", file_path: "/suivante" });
+    expect(estimateBatch([skipped, pendingNext], NOW, () => 5_000).remainingMs).toBeNull();
+
+    // Encodée en 30 s (machine rapide) : 30 s pour 5000 octets -> la
+    // suivante, de même taille, ~30 s.
+    const encoded = job({ ...skipped, progress: 100, started_at: NOW - 32_000 });
+    expect(estimateBatch([encoded, pendingNext], NOW, () => 5_000).remainingMs).toBe(30_000);
   });
 
   it("sans mesure possible : pas de temps restant, avancement en nombre de fichiers", () => {

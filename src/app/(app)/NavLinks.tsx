@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderOpen, ListChecks } from "lucide-react";
+import { Archive, FolderOpen, ListChecks } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
   { href: "/", label: "Parcourir", icon: FolderOpen },
   { href: "/jobs", label: "Traitements", icon: ListChecks },
+  { href: "/backups", label: "Sauvegardes", icon: Archive },
 ] as const;
 
 export function NavLinks() {

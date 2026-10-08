@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { ASSET_VERSION } from "@/lib/asset-version";
+import { DataPersistenceBanner } from "./DataPersistenceBanner";
 import { LogoutButton } from "./LogoutButton";
 import { NavLinks } from "./NavLinks";
 import { ThemeToggle } from "./ThemeToggle";
@@ -25,7 +26,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <LogoutButton />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-8 lg:px-5">{children}</main>
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-8 lg:px-5">
+        <DataPersistenceBanner />
+        {children}
+      </main>
     </div>
   );
 }

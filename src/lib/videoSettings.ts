@@ -68,13 +68,25 @@ export const VIDEO_TARGET_RATIO = 0.7;
 // Profil de taille cible : "film" = VIDEO_TARGET_RATIO de la source ;
 // "series" = en plus, plafond absolu proportionnel à la durée de l'épisode
 // (un épisode n'a pas besoin du débit d'un film pour rester propre — anime
-// et sitcoms se compressent particulièrement bien en x265).
-export const VIDEO_PROFILES = ["film", "series"] as const;
+// et sitcoms se compressent particulièrement bien en x265) ; "auto" =
+// l'un ou l'autre d'après la durée (voir resolveSizeProfile), pour scanner
+// un dossier mixte sans se tromper de type.
+export const VIDEO_PROFILES = ["auto", "film", "series"] as const;
 export type VideoProfile = (typeof VIDEO_PROFILES)[number];
-export const DEFAULT_VIDEO_PROFILE: VideoProfile = "film";
+export type SizeProfile = Exclude<VideoProfile, "auto">;
+export const DEFAULT_VIDEO_PROFILE: VideoProfile = "auto";
 
 export function isVideoProfile(value: unknown): value is VideoProfile {
   return typeof value === "string" && (VIDEO_PROFILES as readonly string[]).includes(value);
+}
+
+// "auto" : en dessous, un épisode de série (sitcom ~20 min, série ~45-60
+// min) ; au-dessus, un film (rarement moins de 75 min).
+export const AUTO_SERIES_MAX_DURATION_S = 70 * 60;
+
+export function resolveSizeProfile(profile: VideoProfile, durationS: number): SizeProfile {
+  if (profile !== "auto") return profile;
+  return durationS < AUTO_SERIES_MAX_DURATION_S ? "series" : "film";
 }
 
 // Plafond "series" : base + par minute — ~440 Mo pour 20 min (sitcom,
@@ -85,7 +97,7 @@ export const SERIES_BYTES_PER_MINUTE = 12 * MB;
 
 // Taille maximale visée pour le résultat (octets) — jamais plus de
 // VIDEO_TARGET_RATIO de la source, quel que soit le profil.
-export function videoTargetSize(sourceSize: number, durationS: number, profile: VideoProfile): number {
+export function videoTargetSize(sourceSize: number, durationS: number, profile: SizeProfile): number {
   const ratioCap = sourceSize * VIDEO_TARGET_RATIO;
   if (profile === "film") return ratioCap;
   return Math.min(ratioCap, seriesSizeCap(durationS));
@@ -104,7 +116,7 @@ export const FILM_COMPACT_BYTES_PER_MINUTE = 22 * MB;
 // perdre en qualité pour un gain faible. Au-dessus (ex: épisode HEVC de
 // 1,7 Go pour 45 min, copie 4K de Blu-ray), elle est ré-encodée comme une
 // autre — le gain vaut alors la légère perte d'un second encodage.
-export function compactSizeLimit(durationS: number, profile: VideoProfile): number {
+export function compactSizeLimit(durationS: number, profile: SizeProfile): number {
   if (profile === "series") return seriesSizeCap(durationS);
   return (FILM_COMPACT_BYTES_PER_MINUTE * durationS) / 60;
 }

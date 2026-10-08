@@ -29,9 +29,6 @@ export type BatchEstimate = {
 const MIN_VIDEO_PERCENT = 1;
 const MIN_VIDEO_ELAPSED_MS = 20_000;
 
-// Une vidéo "terminée" en moins de ce temps n'a pas été encodée (déjà en
-// HEVC, fichier en erreur...) : elle fausserait la vitesse mesurée.
-const MIN_REAL_ENCODE_MS = 60_000;
 
 const isTerminal = (job: EtaJob) => job.status !== "pending" && job.status !== "running";
 
@@ -56,6 +53,24 @@ export function runningVideoRemainingMs(job: EtaJob, now: number): number | null
   const elapsed = activeDurationMs(job, now);
   if (percent < MIN_VIDEO_PERCENT || elapsed < MIN_VIDEO_ELAPSED_MS) return null;
   return (elapsed * (100 - percent)) / percent;
+}
+
+// Temps d'encodage effectif et octets source cumulés des vidéos réellement
+// encodées (terminées) parmi jobs : base de la vitesse en ms par octet,
+// réutilisée par l'analyse préalable d'un dossier (voir videoAnalysis.ts).
+// "Réellement encodée" = encodage mené à 100 % : une vidéo laissée telle
+// quelle (déjà en HEVC, déjà optimisée) n'a jamais d'avancement et, finie en
+// quelques secondes, fausserait la vitesse.
+export function measuredVideoSpeed(jobs: EtaJob[], now: number): { ms: number; bytes: number } {
+  let ms = 0;
+  let bytes = 0;
+  for (const j of jobs) {
+    if (j.kind !== "video" || j.status !== "done" || !j.original_size) continue;
+    if ((j.progress ?? 0) < 100) continue;
+    ms += activeDurationMs(j, now);
+    bytes += j.original_size;
+  }
+  return { ms, bytes };
 }
 
 function average(values: number[]): number | null {
@@ -85,13 +100,7 @@ export function estimateBatch(
 
   const imageAvgMs = average(finished.filter((j) => j.kind !== "video").map(duration));
 
-  let videoMs = 0;
-  let videoBytes = 0;
-  for (const j of finished) {
-    if (j.kind !== "video" || !j.original_size || duration(j) < MIN_REAL_ENCODE_MS) continue;
-    videoMs += duration(j);
-    videoBytes += j.original_size;
-  }
+  let { ms: videoMs, bytes: videoBytes } = measuredVideoSpeed(jobs, now);
 
   let remaining: number | null = 0;
   const add = (ms: number | null) => {
