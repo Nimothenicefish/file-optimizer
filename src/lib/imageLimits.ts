@@ -15,3 +15,29 @@ export const DEFAULT_MAX_DIMENSION = 4000;
 export const MAX_INPUT_PIXELS = 2_000_000_000;
 
 export const DEFAULT_QUALITY = 85;
+
+// Au-delà de ce rapport longueur/largeur, une image est "très allongée"
+// (bande de webtoon/manga, capture d'écran défilante, panorama) : la taille
+// max s'applique alors à son PLUS PETIT côté. Appliquée au plus grand, elle
+// écraserait la largeur (720x15000 -> 192x4000 avec 4000px) et rendrait le
+// contenu flou, texte illisible.
+export const ELONGATED_RATIO = 3;
+
+export type ResizePlan = {
+  // Côté à ramener à maxDimension (l'autre suit, proportions conservées).
+  side: "width" | "height";
+  elongated: boolean;
+};
+
+// Faut-il redimensionner, et selon quel côté ? null si l'image respecte déjà
+// la limite (jamais d'agrandissement).
+export function planResize(width: number, height: number, maxDimension: number): ResizePlan | null {
+  if (width <= 0 || height <= 0) return null;
+  const elongated = Math.max(width, height) / Math.min(width, height) > ELONGATED_RATIO;
+  // Image classique : on limite le plus grand côté ; très allongée : le plus
+  // petit.
+  const limitWidth = elongated ? width <= height : width >= height;
+  const limited = limitWidth ? width : height;
+  if (limited <= maxDimension) return null;
+  return { side: limitWidth ? "width" : "height", elongated };
+}

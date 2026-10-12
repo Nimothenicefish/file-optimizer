@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
-import { MAX_INPUT_PIXELS } from "@/lib/imageLimits";
+import { MAX_INPUT_PIXELS, planResize } from "@/lib/imageLimits";
 import { ORIGIN_FOLDER_NAME } from "@/lib/naming";
 
 export type OptimizeImageParams = {
@@ -96,17 +96,16 @@ export async function optimizeImage(params: OptimizeImageParams): Promise<Optimi
   });
 
   const metadata = await image.metadata();
-  if ((metadata.width ?? 0) > maxDimension || (metadata.height ?? 0) > maxDimension) {
+  const resizePlan = planResize(metadata.width ?? 0, metadata.height ?? 0, maxDimension);
+  if (resizePlan) {
     // Demandé AVANT toBuffer() : fait partie du même pipeline sharp que le
-    // décodage lui-même (shrink-on-load).
-    image.resize({
-      width: maxDimension,
-      height: maxDimension,
-      fit: "inside",
-      withoutEnlargement: true,
-    });
+    // décodage lui-même (shrink-on-load). Un seul côté imposé : l'autre suit
+    // (proportions conservées).
+    image.resize({ [resizePlan.side]: maxDimension, withoutEnlargement: true });
     onProgress?.(
-      `redimensionnée (${metadata.width}x${metadata.height} dépassait ${maxDimension}px)`
+      resizePlan.elongated
+        ? `redimensionnée (image très allongée ${metadata.width}x${metadata.height} : plus petit côté ramené à ${maxDimension}px)`
+        : `redimensionnée (${metadata.width}x${metadata.height} dépassait ${maxDimension}px)`
     );
   }
 

@@ -347,3 +347,47 @@ describe("optimizeImage — annulation", () => {
     expect(fs.readdirSync(dir)).toEqual(["photo.png"]);
   });
 });
+
+describe("planResize — images très allongées (webtoon, capture défilante, panorama)", () => {
+  it("image classique : limite le plus grand côté", async () => {
+    const { planResize } = await import("@/lib/imageLimits");
+    expect(planResize(6000, 3000, 2000)).toEqual({ side: "width", elongated: false });
+    expect(planResize(3000, 6000, 2000)).toEqual({ side: "height", elongated: false });
+    expect(planResize(1500, 1000, 2000)).toBeNull();
+  });
+
+  it("image très allongée (> 3:1) : limite le plus petit côté, jamais la largeur d'une bande", async () => {
+    const { planResize } = await import("@/lib/imageLimits");
+    expect(planResize(720, 15000, 4000)).toBeNull();
+    expect(planResize(5000, 20000, 4000)).toEqual({ side: "width", elongated: true });
+    expect(planResize(20000, 5000, 4000)).toEqual({ side: "height", elongated: true });
+  });
+});
+
+describe("optimizeImage — bandes verticales (720x15000)", () => {
+  it("garde les dimensions d'une bande dont la largeur est sous la limite (plus de flou)", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "webtoon.jpg");
+    await sharp({ create: { width: 720, height: 15000, channels: 3, background: { r: 200, g: 180, b: 160 } } })
+      .jpeg({ quality: 98 })
+      .toFile(filePath);
+
+    await optimizeImage({ filePath, maxDimension: 4000, quality: 80, keepOriginal: false });
+
+    const meta = await sharp(fs.readFileSync(filePath)).metadata();
+    expect([meta.width, meta.height]).toEqual([720, 15000]);
+  });
+
+  it("réduit une bande trop large par sa largeur, proportions conservées", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "large.jpg");
+    await sharp({ create: { width: 4000, height: 16000, channels: 3, background: { r: 1, g: 2, b: 3 } } })
+      .jpeg({ quality: 98 })
+      .toFile(filePath);
+
+    await optimizeImage({ filePath, maxDimension: 2000, quality: 80, keepOriginal: false });
+
+    const meta = await sharp(fs.readFileSync(filePath)).metadata();
+    expect([meta.width, meta.height]).toEqual([2000, 8000]);
+  });
+});

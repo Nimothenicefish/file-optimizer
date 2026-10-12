@@ -41,6 +41,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { BatchEstimate } from "@/lib/eta";
+import { ELONGATED_RATIO } from "@/lib/imageLimits";
 import type { AnalysisItem, AnalysisResult } from "@/lib/videoAnalysis";
 import { formatRemaining, formatSize } from "@/lib/format";
 import {
@@ -682,6 +683,11 @@ export default function BrowsePage() {
               Forcer la conversion en JPG
             </Label>
           </div>
+          <p className="text-xs text-muted-foreground">
+            Images très allongées (plus de {ELONGATED_RATIO}× plus longues que larges : bandes de
+            webtoon/manga, captures défilantes, panoramas) : la taille max s&apos;applique à leur plus
+            petit côté, pour ne jamais rendre le contenu flou ou le texte illisible.
+          </p>
           {forceJpeg && (
             <p className="text-xs text-muted-foreground">
               Convertit les PNG/WebP/AVIF en JPG (gain de place quasi garanti grâce à la compression

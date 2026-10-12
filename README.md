@@ -18,7 +18,10 @@ authentification par session, Docker.
   - **Sélection manuelle** : coche des photos précises en parcourant les
     dossiers (la sélection s'accumule tant qu'elle n'est pas vidée ou
     envoyée), puis "Optimiser la sélection".
-  - Réglages communs aux deux : taille max (plus grand côté, en pixels),
+  - Réglages communs aux deux : taille max (plus grand côté, en pixels ;
+    plus **petit** côté pour une image très allongée — plus de 3× plus
+    longue que large : bande de webtoon/manga, capture défilante, panorama —
+    pour ne pas l'écraser : une bande 720x15000 garde ses dimensions),
     qualité (JPEG/WebP/AVIF ; un PNG est toujours recompressé sans perte,
     indépendamment de ce réglage), conservation des originaux, conversion
     forcée en JPG (désactivée par défaut).
