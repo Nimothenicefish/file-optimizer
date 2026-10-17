@@ -82,6 +82,36 @@ function makeSourceMkv(
   ]);
 }
 
+// MP4 type "vidéo de téléphone/téléchargée" : H.264 à images B + AAC (qui
+// démarre avant 0, comme tout AAC en MP4), date de tournage.
+function makeSourceMp4(target: string) {
+  execFileSync("ffmpeg", [
+    "-v", "error", "-y",
+    "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=5",
+    "-f", "lavfi", "-i", "sine=duration=5",
+    "-c:v", "libx264", "-bf", "3", "-crf", "8", "-preset", "ultrafast", "-c:a", "aac",
+    "-metadata", "creation_time=2019-07-14T10:30:00.000000Z",
+    target,
+  ]);
+}
+
+// AVI type "DivX/XviD" : MPEG-4 ASP à images B (horodatages approximatifs du
+// conteneur), audio MP3.
+function makeSourceAvi(target: string) {
+  execFileSync("ffmpeg", [
+    "-v", "error", "-y",
+    "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=5",
+    "-f", "lavfi", "-i", "sine=duration=5",
+    "-c:v", "libxvid", "-bf", "2", "-q:v", "2", "-c:a", "libmp3lame", "-b:a", "128k",
+    target,
+  ]);
+}
+
+function formatTags(file: string): Record<string, string> {
+  const out = execFileSync("ffprobe", ["-v", "quiet", "-print_format", "json", "-show_format", file]);
+  return JSON.parse(out.toString()).format.tags ?? {};
+}
+
 beforeAll(async () => {
   const app = await setupTestApp("file-optimizer-video-test-");
   tmpDir = app.tmpDir;
@@ -249,6 +279,81 @@ describe("optimizeVideo — ré-encode la vidéo en x265, recopie tout le reste 
   });
 });
 
+describe("optimizeVideo — MP4 et AVI", () => {
+  it("MP4 : reste un MP4 du même nom (HEVC lisible par Apple), audio et date de tournage intacts", async () => {
+    const filePath = path.join(fixtureDir, "vacances.mp4");
+    makeSourceMp4(filePath);
+    const sourcePackets = packetsByStream(filePath);
+    const sourceSize = fs.statSync(filePath).size;
+
+    const result = await optimizeVideo({ filePath, crf: 28, preset: "ultrafast", profile: "film", keepSource: false });
+
+    expect(result.finalPath).toBe(filePath);
+    expect(result.optimizedSize).toBeLessThan(sourceSize);
+    const tags = formatTags(filePath);
+    expect(tags.major_brand).toBeDefined();
+    expect(tags.creation_time).toBe("2019-07-14T10:30:00.000000Z");
+    expect(tags.FILE_OPTIMIZER).toContain("x265");
+    const streams = probeStreams(filePath) as Array<ProbeStream & { codec_tag_string?: string }>;
+    expect(streams.map((s) => s.codec_name)).toEqual(["hevc", "aac"]);
+    expect(streams[0].codec_tag_string).toBe("hvc1");
+    const outPackets = packetsByStream(filePath);
+    expect(outPackets.get(1)).toEqual(sourcePackets.get(1));
+    expect(outPackets.get(0)?.first).toBeCloseTo(sourcePackets.get(0)!.first, 3);
+
+    // Tag relu sur un MP4 aussi : jamais ré-encodé deux fois.
+    const messages: string[] = [];
+    await optimizeVideo({
+      filePath, crf: 28, preset: "ultrafast", profile: "film", keepSource: false,
+      onProgress: (m) => messages.push(m),
+    });
+    expect(messages.join("\n")).toContain("déjà optimisé par file-optimizer");
+  });
+
+  it("AVI : devient un MKV du même nom (audio MP3 copié tel quel), l'AVI est supprimé", async () => {
+    const filePath = path.join(fixtureDir, "vieux-film.avi");
+    makeSourceAvi(filePath);
+    const sourcePackets = packetsByStream(filePath);
+    const mkvPath = path.join(fixtureDir, "vieux-film.mkv");
+
+    const result = await optimizeVideo({ filePath, crf: 28, preset: "ultrafast", profile: "film", keepSource: false });
+
+    expect(result.finalPath).toBe(mkvPath);
+    expect(fs.existsSync(filePath)).toBe(false);
+    expect(fs.existsSync(`${filePath}.part`)).toBe(false);
+    expect(fs.statSync(mkvPath).size).toBe(result.optimizedSize);
+    expect(probeStreams(mkvPath).map((s) => s.codec_name)).toEqual(["hevc", "mp3"]);
+    expect(packetsByStream(mkvPath).get(1)).toEqual(sourcePackets.get(1));
+    expect(formatTags(mkvPath).FILE_OPTIMIZER).toContain("x265");
+  });
+
+  it("AVI : source conservée en .avi.bkp si demandé", async () => {
+    const filePath = path.join(fixtureDir, "garde.avi");
+    makeSourceAvi(filePath);
+    const sourceBytes = fs.readFileSync(filePath);
+
+    const result = await optimizeVideo({ filePath, crf: 28, preset: "ultrafast", profile: "film", keepSource: true });
+
+    expect(result.finalPath).toBe(path.join(fixtureDir, "garde.mkv"));
+    expect(fs.existsSync(filePath)).toBe(false);
+    expect(fs.readFileSync(`${filePath}.bkp`).equals(sourceBytes)).toBe(true);
+  });
+
+  it("AVI : refuse d'écraser un MKV du même nom déjà présent, sans rien encoder", async () => {
+    const filePath = path.join(fixtureDir, "doublon.avi");
+    makeSourceAvi(filePath);
+    const before = fs.readFileSync(filePath);
+    fs.writeFileSync(path.join(fixtureDir, "doublon.mkv"), "autre version");
+
+    await expect(
+      optimizeVideo({ filePath, crf: 28, preset: "ultrafast", profile: "film", keepSource: false })
+    ).rejects.toThrow("doublon.mkv existe déjà");
+    expect(fs.readFileSync(filePath).equals(before)).toBe(true);
+    expect(fs.readFileSync(path.join(fixtureDir, "doublon.mkv"), "utf8")).toBe("autre version");
+    expect(fs.existsSync(`${filePath}.part`)).toBe(false);
+  });
+});
+
 // Process ffmpeg encore vivants qui écrivent dans ce fichier (via /proc).
 function ffmpegProcessesWriting(target: string): number {
   let count = 0;
@@ -371,6 +476,18 @@ describe("verifyOutput — ne tolère qu'un décalage commun à toutes les piste
     expect(video[0]).toContain("video");
   });
 
+  it("AVI : tolère l'horodatage approximatif de la vidéo (~2 images), pas un vrai décalage", () => {
+    const avi = { ...probe("mpeg4"), format: { duration: "100", format_name: "avi" } };
+    const source = packets([0, 0, 0]);
+    expect(verifyOutput(avi, probe("hevc"), source, packets([0.04, 0, 0]))).toEqual([]);
+    expect(verifyOutput(avi, probe("hevc"), source, packets([0.5, 0, 0])).join()).toContain("video");
+    // Les autres pistes restent comparées entre elles au millième.
+    expect(verifyOutput(avi, probe("hevc"), source, packets([0, 0.007, 0]))).toHaveLength(1);
+    // Et un audio vraiment décalé l'est aussi par rapport à la vidéo.
+    const audioLate = verifyOutput(avi, probe("hevc"), source, packets([0, 0.5, 0.5]));
+    expect(audioLate.join()).toContain("video");
+  });
+
   it("rejette une piste manquante ou un paquet perdu", () => {
     const missing = { ...probe("hevc"), streams: probe("hevc").streams.slice(0, 2) };
     const result = verifyOutput(probe("h264"), missing, packets([0, 0, 0]), packets([0, 0, 0]));
@@ -434,8 +551,38 @@ describe("analyzeVideos — analyse d'un dossier sans rien lancer", () => {
   });
 });
 
+describe("analyzeVideos — formats", () => {
+  it("n'analyse que les formats demandés ; annonce la conversion AVI -> MKV et un nom déjà pris", async () => {
+    const dir = path.join(photosDir, "analyse-formats");
+    fs.mkdirSync(dir);
+    makeSourceMkv(path.join(dir, "film.mkv"));
+    makeSourceAvi(path.join(dir, "vieux.avi"));
+    makeSourceAvi(path.join(dir, "film.avi"));
+
+    const onlyMkv = await analyzeVideos("analyse-formats", "film", new Set(["mkv"]));
+    expect(onlyMkv.items.map((i) => path.basename(i.path))).toEqual(["film.mkv"]);
+
+    const all = await analyzeVideos("analyse-formats", "film");
+    const byName = Object.fromEntries(all.items.map((i) => [path.basename(i.path), i]));
+    expect(byName["vieux.avi"]).toMatchObject({ action: "encode", reason: "AVI converti en MKV" });
+    expect(byName["film.avi"].action).toBe("error");
+    expect(byName["film.avi"].reason).toContain("film.mkv existe déjà");
+  });
+});
+
 describe("worker + scan en mode vidéo", () => {
-  it("le scan 'video' ne trouve que les MKV, et le worker les encode jusqu'au bout", async () => {
+  it("le scan 'video' refuse une liste de formats vide", async () => {
+    const res = await scanRoute.POST(
+      new Request("http://localhost/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "", mode: "video", videoFormats: [] }),
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("le scan 'video' ne trouve que les vidéos, et le worker les encode jusqu'au bout", async () => {
     const dir = path.join(photosDir, "films");
     fs.mkdirSync(dir);
     makeSourceMkv(path.join(dir, "film.mkv"));

@@ -33,6 +33,10 @@ beforeAll(async () => {
   // Source conservée et encodage en cours : jamais à ré-encoder.
   fs.writeFileSync(path.join(photosDir, "vacances", "film2.mkv.bkp"), "f");
   fs.writeFileSync(path.join(photosDir, "vacances", "film3.mkv.part"), "g");
+  fs.mkdirSync(path.join(photosDir, "videos", "saison1"), { recursive: true });
+  for (const name of ["film.mkv", "clip.mp4", "saison1/ep1.AVI", "autre.mov", "clip.mp4.bkp"]) {
+    fs.writeFileSync(path.join(photosDir, "videos", name), "v");
+  }
 });
 
 afterAll(() => {
@@ -97,10 +101,20 @@ describe("listMediaRecursive — descend dans les sous-dossiers, ignore origin/"
     );
   });
 
-  it("en mode vidéo, ne trouve que les MKV (jamais les photos ni les .bkp)", () => {
+  it("en mode vidéo, ne trouve que les vidéos (jamais les photos ni les .bkp)", () => {
     expect(listMediaRecursive("vacances", "video")).toEqual([
       path.join(photosDir, "vacances", "film.mkv"),
     ]);
+  });
+
+  it("vidéos : MKV, MP4 et AVI par défaut, ou seulement les formats demandés", () => {
+    const names = (formats?: string[]) =>
+      listMediaRecursive("videos", "video", formats && new Set(formats))
+        .map((f) => path.relative(path.join(photosDir, "videos"), f))
+        .sort();
+    expect(names()).toEqual(["clip.mp4", "film.mkv", "saison1/ep1.AVI"]);
+    expect(names(["mkv"])).toEqual(["film.mkv"]);
+    expect(names(["mp4", "avi"])).toEqual(["clip.mp4", "saison1/ep1.AVI"]);
   });
 });
 

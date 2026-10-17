@@ -16,7 +16,7 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 
 export type OptimizeSettings = Omit<EnqueueParams, "filePath" | "kind" | "keepOriginal"> & {
   keepOriginal: boolean; // photos : origin/ (activé par défaut)
-  keepVideoSource: boolean; // vidéos : .mkv.bkp (désactivé par défaut)
+  keepVideoSource: boolean; // vidéos : <nom>.<ext>.bkp (désactivé par défaut)
 };
 
 // Réglages d'optimisation envoyés par l'UI (scan ou sélection manuelle),

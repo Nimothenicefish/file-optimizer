@@ -1,9 +1,31 @@
 // Formats vidéo pris en charge par le mode "Vidéos" (ré-encodage x265, voir
-// src/lib/pipeline/optimizeVideo.ts). Volontairement limité au MKV : c'est
-// le seul conteneur dont on garantit la conservation de TOUTES les pistes
-// (audio multiples, sous-titres de tout type, polices ASS en pièces jointes,
-// chapitres) telles quelles.
-export const VIDEO_EXT = new Set(["mkv"]);
+// src/lib/pipeline/optimizeVideo.ts). Toutes les pistes autres que la vidéo
+// (audio, sous-titres, polices, chapitres) sont recopiées telles quelles :
+// - mkv et mp4 restent dans leur conteneur (même nom de fichier) ;
+// - avi devient un mkv (film.avi -> film.mkv) : le HEVC n'a pas de place
+//   standard dans un AVI (presque aucun lecteur ne le lirait), alors que le
+//   MKV accepte tel quel tout ce qu'un AVI peut contenir (MP3, AC3, PCM...).
+export const VIDEO_FORMATS = ["mkv", "mp4", "avi"] as const;
+export type VideoFormat = (typeof VIDEO_FORMATS)[number];
+export const VIDEO_EXT: ReadonlySet<string> = new Set(VIDEO_FORMATS);
+
+export function isVideoFormat(value: unknown): value is VideoFormat {
+  return typeof value === "string" && VIDEO_EXT.has(value);
+}
+
+// Extension du fichier produit pour une source de cette extension.
+export function videoOutputExt(sourceExt: string): VideoFormat {
+  const ext = sourceExt.toLowerCase();
+  return ext === "mp4" ? "mp4" : "mkv";
+}
+
+// Formats demandés par le client pour un scan/une analyse : null = tous (champ
+// absent ou invalide) ; un tableau ne garde que les formats connus — vide si
+// l'utilisateur a tout décoché (refusé par les routes).
+export function parseVideoFormats(value: unknown): Set<VideoFormat> | null {
+  if (!Array.isArray(value)) return null;
+  return new Set(value.filter(isVideoFormat));
+}
 
 // Facteur de qualité constant x265 (0 = sans perte, 51 = le pire). 22 :
 // visuellement quasi transparent sur un film 1080p, tout en divisant
@@ -126,13 +148,13 @@ export function compactSizeLimit(durationS: number, profile: SizeProfile): numbe
 // s'il est encore lourd pour son type (voir compactSizeLimit).
 export const VIDEO_SKIP_CODECS = new Set(["hevc", "av1", "vp9"]);
 
-// Tag MKV global posé sur chaque fichier produit par cette app : un fichier
+// Tag global (MKV comme MP4) posé sur chaque fichier produit par cette app : un fichier
 // qui le porte n'est jamais ré-encodé (sans lui, un résultat encore au-dessus
 // du seuil "compact" serait re-compressé à chaque nouveau scan).
 export const VIDEO_OPTIMIZED_TAG = "FILE_OPTIMIZER";
 
 // Extension ajoutée à la source quand l'utilisateur choisit de la conserver
-// (film.mkv -> film.mkv.bkp, à côté du résultat). Hors VIDEO_EXT : jamais
+// (film.mkv -> film.mkv.bkp, film.avi -> film.avi.bkp, à côté du résultat). Hors VIDEO_EXT : jamais
 // listée comme vidéo, donc jamais ré-encodée par un scan ultérieur.
 export const VIDEO_BACKUP_SUFFIX = ".bkp";
 

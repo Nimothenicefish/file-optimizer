@@ -3,9 +3,9 @@ import path from "node:path";
 import { ORIGIN_FOLDER_NAME, isSynologyEaDir } from "@/lib/naming";
 import { FILES_DIR } from "@/lib/paths";
 import { IMAGE_EXT, resolvePhotoPath, toPhotoRelPath } from "@/lib/photoBrowse";
-import { VIDEO_BACKUP_SUFFIX, VIDEO_EXT } from "@/lib/videoSettings";
+import { VIDEO_BACKUP_SUFFIX, VIDEO_EXT, videoOutputExt } from "@/lib/videoSettings";
 
-// Sauvegardes laissées par l'app : sources vidéo conservées (film.mkv.bkp,
+// Sauvegardes laissées par l'app : sources vidéo conservées (film.mkv.bkp, film.avi.bkp,
 // voir optimizeVideo.ts) et originaux photo déplacés dans origin/ (voir
 // optimizeImage.ts). Tant qu'elles existent, la place "gagnée" ne l'est pas
 // vraiment : cette page permet de les supprimer une fois le résultat vérifié.
@@ -52,9 +52,14 @@ function findOptimized(backupPath: string): string | null {
 
   if (isVideoBackupName(name)) {
     const inner = name.slice(0, -VIDEO_BACKUP_SUFFIX.length);
-    candidates.push(inner);
-    const stripped = withoutCollisionSuffix(inner);
-    if (stripped) candidates.push(stripped);
+    // Résultat du même nom, ou en .mkv pour un AVI converti (film.avi.bkp
+    // -> film.mkv).
+    const ext = path.extname(inner);
+    const outExt = `.${videoOutputExt(ext.slice(1))}`;
+    for (const base of [inner, withoutCollisionSuffix(inner)]) {
+      if (!base) continue;
+      candidates.push(ext.toLowerCase() === outExt ? base : `${path.basename(base, ext)}${outExt}`);
+    }
     return candidates.map((c) => path.join(dir, c)).find((c) => fileSize(c) != null) ?? null;
   }
 

@@ -452,7 +452,7 @@ export default function JobsPage() {
                 <>
                   Vidéo x265 ({PROFILE_LABEL[logJob.video_profile ?? ""] ?? "film"}) · CRF :{" "}
                   {logJob.video_crf} · Preset : {logJob.video_preset} · Conserve
-                  la source (.mkv.bkp) : {logJob.keep_original ? "oui" : "non"}
+                  la source (.bkp) : {logJob.keep_original ? "oui" : "non"}
                 </>
               ) : (
                 <>

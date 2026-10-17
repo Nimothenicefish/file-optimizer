@@ -50,9 +50,12 @@ import {
   DEFAULT_VIDEO_CRF,
   DEFAULT_VIDEO_PRESET,
   DEFAULT_VIDEO_PROFILE,
+  VIDEO_FORMATS,
   VIDEO_PRESETS,
   VIDEO_TARGET_RATIO,
+  type VideoFormat,
   describeCrf,
+  isVideoFormat,
   isVideoPreset,
   isVideoProfile,
   type VideoPreset,
@@ -69,6 +72,13 @@ type Entry = {
 };
 
 const MODE_NOUN: Record<Mode, string> = { image: "photo(s)", video: "vidéo(s)" };
+
+// "dossier/Film.MKV" -> "mkv".
+function extensionOf(filePath: string): string {
+  const name = filePath.slice(filePath.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
 
 // Onglet actif bien visible (même accent que les filtres de statut sur
 // /jobs) : Radix pose data-state="active", que les styles "data-active:" par
@@ -154,6 +164,7 @@ type StoredSettings = Partial<{
   videoPreset: VideoPreset;
   videoProfile: VideoProfile;
   keepVideoSource: boolean;
+  videoFormats: VideoFormat[];
 }>;
 
 function loadStoredSettings(): StoredSettings {
@@ -172,6 +183,7 @@ function loadStoredSettings(): StoredSettings {
       videoPreset: isVideoPreset(raw.videoPreset) ? raw.videoPreset : undefined,
       videoProfile: isVideoProfile(raw.videoProfile) ? raw.videoProfile : undefined,
       keepVideoSource: bool(raw.keepVideoSource),
+      videoFormats: Array.isArray(raw.videoFormats) ? raw.videoFormats.filter(isVideoFormat) : undefined,
     };
   } catch {
     return {};
@@ -230,7 +242,7 @@ export default function BrowsePage() {
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [forceJpeg, setForceJpeg] = useState(false);
 
-  // Mode "Photos" ou "Vidéos MKV" : détermine ce qui est sélectionnable/
+  // Mode "Photos" ou "Vidéos" : détermine ce qui est sélectionnable/
   // scanné et les réglages affichés — jamais les deux à la fois, pour qu'un
   // scan de photos n'embarque pas un encodage vidéo de plusieurs heures.
   const [mode, setMode] = useState<Mode>("image");
@@ -238,6 +250,8 @@ export default function BrowsePage() {
   const [videoPreset, setVideoPreset] = useState<VideoPreset>(DEFAULT_VIDEO_PRESET);
   const [videoProfile, setVideoProfile] = useState<VideoProfile>(DEFAULT_VIDEO_PROFILE);
   const [keepVideoSource, setKeepVideoSource] = useState(false);
+  // Formats vidéo pris en compte par le scan, l'analyse et la sélection.
+  const [videoFormats, setVideoFormats] = useState<VideoFormat[]>([...VIDEO_FORMATS]);
 
   const [scanning, setScanning] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -365,15 +379,30 @@ export default function BrowsePage() {
     });
   }
 
+  // Fichier sélectionnable dans le mode actif (et, en vidéo, d'un format coché).
+  function isSelectable(entry: Entry): boolean {
+    if (entry.type !== mode) return false;
+    return mode !== "video" || (videoFormats as string[]).includes(extensionOf(entry.path));
+  }
+
   function selectAllHere() {
     setSelected((s) => {
       const next = new Set(s);
       for (const e of entries) {
-        if (e.type === mode) next.add(e.path);
+        if (isSelectable(e)) next.add(e.path);
       }
       return next;
     });
   }
+
+  function toggleVideoFormat(format: VideoFormat, checked: boolean) {
+    const next = VIDEO_FORMATS.filter((f) => (f === format ? checked : videoFormats.includes(f)));
+    setVideoFormats(next);
+    // Un fichier d'un format décoché ne reste pas sélectionné en douce.
+    setSelected((s) => new Set([...s].filter((p) => (next as string[]).includes(extensionOf(p)))));
+  }
+
+  const noVideoFormat = mode === "video" && videoFormats.length === 0;
 
   function changeMode(nextMode: Mode) {
     setMode(nextMode);
@@ -407,12 +436,13 @@ export default function BrowsePage() {
     if (stored.videoPreset) setVideoPreset(stored.videoPreset);
     if (stored.videoProfile) setVideoProfile(stored.videoProfile);
     if (stored.keepVideoSource != null) setKeepVideoSource(stored.keepVideoSource);
+    if (stored.videoFormats) setVideoFormats(stored.videoFormats);
     setSettingsLoaded(true);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   useEffect(() => {
-    if (settingsLoaded) storeSettings({ mode, ...settings });
+    if (settingsLoaded) storeSettings({ mode, videoFormats, ...settings });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     settingsLoaded,
@@ -425,6 +455,7 @@ export default function BrowsePage() {
     videoPreset,
     videoProfile,
     keepVideoSource,
+    videoFormats,
   ]);
 
   async function scanFolder() {
@@ -433,7 +464,7 @@ export default function BrowsePage() {
       const res = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, mode, ...settings }),
+        body: JSON.stringify({ path, mode, videoFormats, ...settings }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -457,7 +488,7 @@ export default function BrowsePage() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, videoProfile }),
+        body: JSON.stringify({ path, videoProfile, videoFormats }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -524,7 +555,7 @@ export default function BrowsePage() {
           </TabsTrigger>
           <TabsTrigger value="video" className={MODE_TAB_CLASS}>
             <Film />
-            Vidéos MKV
+            Vidéos
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -616,7 +647,7 @@ export default function BrowsePage() {
                 checked={keepVideoSource}
                 onCheckedChange={(c) => setKeepVideoSource(c === true)}
               />
-              Conserver la source (renommée en .mkv.bkp)
+              Conserver la source (renommée en .bkp)
             </Label>
           </div>
           <p className="text-xs">
@@ -628,7 +659,9 @@ export default function BrowsePage() {
           <p className="text-xs text-muted-foreground">
             Seule la piste vidéo est ré-encodée en x265 : toutes les pistes audio, sous-titres,
             chapitres et polices sont recopiés à l&apos;identique, avec leurs horodatages d&apos;origine
-            (vérifiés après encodage — au moindre écart, la source n&apos;est pas touchée).{" "}
+            (vérifiés après encodage — au moindre écart, la source n&apos;est pas touchée). Les MKV et
+            MP4 gardent leur format et leur nom ; un AVI devient un MKV du même nom (film.avi →
+            film.mkv), le HEVC n&apos;étant pas lisible dans un AVI.{" "}
             {profileCapText(videoProfile)}{" "}
             Un fichier déjà en HEVC/AV1/VP9 n&apos;est ré-encodé que s&apos;il est encore lourd pour
             son type (film : plus de ~1,4 Go par heure ; série : au-dessus du plafond), et jamais un
@@ -728,19 +761,39 @@ export default function BrowsePage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={scanFolder} disabled={scanning} className="gap-1.5">
+        <Button onClick={scanFolder} disabled={scanning || noVideoFormat} className="gap-1.5">
           <ScanSearch className="size-4" />
           {scanning ? "Scan en cours…" : "Scanner ce dossier (récursif)"}
         </Button>
         {mode === "video" && (
-          <Button onClick={analyzeFolder} disabled={analyzing} variant="outline" className="gap-1.5">
+          <Button
+            onClick={analyzeFolder}
+            disabled={analyzing || noVideoFormat}
+            variant="outline"
+            className="gap-1.5"
+          >
             {analyzing ? <Loader2 className="size-4 animate-spin" /> : <SearchCheck className="size-4" />}
             {analyzing ? "Analyse en cours…" : "Analyser ce dossier"}
           </Button>
         )}
-        <Button onClick={selectAllHere} variant="outline">
+        <Button onClick={selectAllHere} disabled={noVideoFormat} variant="outline">
           Sélectionner les {mode === "video" ? "vidéos" : "photos"} de ce dossier
         </Button>
+        {mode === "video" && (
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="text-muted-foreground">Formats :</span>
+            {VIDEO_FORMATS.map((format) => (
+              <Label key={format} className="flex items-center gap-1.5">
+                <Checkbox
+                  checked={videoFormats.includes(format)}
+                  onCheckedChange={(c) => toggleVideoFormat(format, c === true)}
+                />
+                {format.toUpperCase()}
+              </Label>
+            ))}
+            {noVideoFormat && <span className="text-xs text-warning">Coche au moins un format.</span>}
+          </div>
+        )}
       </div>
 
       <div className="panel overflow-hidden">
@@ -765,7 +818,7 @@ export default function BrowsePage() {
               entries.map((entry) => (
                 <tr key={entry.path} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
                   <td className="px-4 py-2">
-                    {entry.type === mode && (
+                    {isSelectable(entry) && (
                       <Checkbox
                         checked={selected.has(entry.path)}
                         onCheckedChange={() => toggleSelect(entry.path)}
@@ -783,7 +836,7 @@ export default function BrowsePage() {
                       </button>
                     ) : (
                       <span
-                        className={`flex items-center gap-2 ${entry.type !== mode ? "text-muted-foreground" : ""}`}
+                        className={`flex items-center gap-2 ${isSelectable(entry) ? "" : "text-muted-foreground"}`}
                       >
                         {entry.type === "image" ? (
                           <ImageIcon className="size-4 text-muted-foreground" />

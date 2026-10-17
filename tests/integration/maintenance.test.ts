@@ -29,6 +29,11 @@ beforeAll(async () => {
   write("Films/film.mkv.bkp", 400);
   write("Films/film_1.mkv.bkp", 300);
   write("Films/perdu.mkv.bkp", 200);
+  // MP4 gardé en MP4 ; AVI devenu MKV (vieux.avi -> vieux.mkv).
+  write("Films/clip.mp4", 100);
+  write("Films/clip.mp4.bkp", 250);
+  write("Films/vieux.mkv", 100);
+  write("Films/vieux.avi.bkp", 350);
   // Photos : original classique, original converti en JPG, orphelin.
   write("Vacances/a.jpg", 10);
   write("Vacances/origin/a.jpg", 50);
@@ -37,7 +42,7 @@ beforeAll(async () => {
   write("Vacances/origin/c.jpg", 70);
   // Ni l'un ni l'autre : jamais listés ni supprimables.
   write("Vacances/notes.txt", 5);
-  write("Films/bande-annonce.mp4.bkp", 5);
+  write("Films/bande-annonce.mov.bkp", 5);
 });
 
 afterAll(() => {
@@ -45,11 +50,13 @@ afterAll(() => {
 });
 
 describe("listBackups — sauvegardes de l'app et leur fichier optimisé", () => {
-  it("trouve .mkv.bkp et originaux d'origin/, les plus lourds d'abord", () => {
+  it("trouve .mkv/.mp4/.avi.bkp et originaux d'origin/, les plus lourds d'abord", () => {
     const entries = backups.listBackups();
     expect(entries.map((e) => [e.path, e.optimizedPath])).toEqual([
       ["Films/film.mkv.bkp", "Films/film.mkv"],
+      ["Films/vieux.avi.bkp", "Films/vieux.mkv"],
       ["Films/film_1.mkv.bkp", "Films/film.mkv"],
+      ["Films/clip.mp4.bkp", "Films/clip.mp4"],
       ["Films/perdu.mkv.bkp", null],
       ["Vacances/origin/c.jpg", null],
       ["Vacances/origin/b.png", "Vacances/b.jpg"],
@@ -65,7 +72,7 @@ describe("deleteBackups — tout est revérifié côté serveur", () => {
       "Vacances/origin/c.jpg",
       "Films/film.mkv",
       "Vacances/notes.txt",
-      "Films/bande-annonce.mp4.bkp",
+      "Films/bande-annonce.mov.bkp",
       "../../etc/passwd",
     ]);
     expect(outcome.deleted).toBe(0);

@@ -2,9 +2,9 @@ import fs from "node:fs";
 import { db } from "@/lib/db";
 import { type EtaJob, measuredVideoSpeed } from "@/lib/eta";
 import { listMediaRecursive, toPhotoRelPath } from "@/lib/photoBrowse";
-import { planVideo, probe } from "@/lib/pipeline/optimizeVideo";
+import { outputConflict, planVideo, probe, videoOutputPath } from "@/lib/pipeline/optimizeVideo";
 import { hasActiveJob } from "@/lib/queue/jobs";
-import type { SizeProfile, VideoProfile } from "@/lib/videoSettings";
+import type { SizeProfile, VideoFormat, VideoProfile } from "@/lib/videoSettings";
 
 export type AnalysisItem = {
   path: string; // relatif à FILES_DIR
@@ -31,12 +31,16 @@ export type AnalysisResult = {
 };
 
 // Analyse un dossier (récursif) AVANT de lancer quoi que ce soit : pour
-// chaque MKV, lit ses métadonnées (ffprobe, sans décoder) et applique
+// chaque vidéo (des formats demandés, tous par défaut), lit ses métadonnées (ffprobe, sans décoder) et applique
 // exactement la décision de l'encodage (voir planVideo). Fichiers lus un
 // par un, en priorité minimale, comme l'encodage lui-même.
-export async function analyzeVideos(relPath: string, profile: VideoProfile): Promise<AnalysisResult> {
+export async function analyzeVideos(
+  relPath: string,
+  profile: VideoProfile,
+  formats?: ReadonlySet<VideoFormat> | null
+): Promise<AnalysisResult> {
   const items: AnalysisItem[] = [];
-  for (const filePath of listMediaRecursive(relPath, "video")) {
+  for (const filePath of listMediaRecursive(relPath, "video", formats)) {
     const size = fs.statSync(filePath).size;
     const base = { path: toPhotoRelPath(filePath), size };
     if (hasActiveJob(filePath)) {
@@ -45,12 +49,19 @@ export async function analyzeVideos(relPath: string, profile: VideoProfile): Pro
     }
     try {
       const plan = planVideo(await probe(filePath), size, profile);
+      const conflict = plan.action === "encode" ? outputConflict(filePath) : null;
+      if (conflict) throw new Error(conflict);
+      const renamed = videoOutputPath(filePath) !== filePath;
+      const note =
+        plan.action === "encode"
+          ? [plan.note, renamed ? "AVI converti en MKV" : null].filter(Boolean).join(" ; ")
+          : null;
       items.push({
         ...base,
         durationS: plan.durationS,
         sizeProfile: plan.sizeProfile,
         action: plan.action,
-        reason: plan.action === "skip" ? plan.reason : plan.note,
+        reason: plan.action === "skip" ? plan.reason : note || null,
         targetSize: plan.action === "encode" ? plan.targetSize : null,
       });
     } catch (err) {

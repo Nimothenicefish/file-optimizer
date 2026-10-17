@@ -172,7 +172,8 @@ async function processJob(job: JobRow) {
         : `optimisé : ${result.originalSize} -> ${result.optimizedSize} octets`
     );
     if (result.finalPath !== job.file_path) {
-      appendLog(job.id, `converti en JPG : ${result.finalPath}`);
+      // Photo convertie en JPG, ou AVI devenu MKV.
+      appendLog(job.id, `nouveau nom : ${result.finalPath}`);
     }
     setStatus(job.id, "done");
     recordJobStats(job.kind === "video" ? "video" : "image", result.originalSize, result.optimizedSize);

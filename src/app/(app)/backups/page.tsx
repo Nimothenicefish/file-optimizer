@@ -87,7 +87,7 @@ export default function BackupsPage() {
       <div>
         <h2 className="text-lg font-semibold tracking-tight">Sauvegardes</h2>
         <p className="text-sm text-muted-foreground">
-          Sources vidéo conservées (<code>.mkv.bkp</code>) et originaux photo (dossiers{" "}
+          Sources vidéo conservées (<code>.mkv.bkp</code>, <code>.mp4.bkp</code>, <code>.avi.bkp</code>) et originaux photo (dossiers{" "}
           <code>origin/</code>). La place n&apos;est vraiment libérée qu&apos;une fois supprimées :
           vérifie d&apos;abord le fichier optimisé.
         </p>

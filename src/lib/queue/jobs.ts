@@ -9,7 +9,7 @@ export type EnqueueParams = {
   maxDimension: number;
   quality: number;
   // Photo : déplacer l'original dans origin/. Vidéo : conserver la source
-  // renommée en .mkv.bkp.
+  // renommée en <nom>.<ext>.bkp.
   keepOriginal: boolean;
   forceJpeg: boolean;
   videoCrf: number;

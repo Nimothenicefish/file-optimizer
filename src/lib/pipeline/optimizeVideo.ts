@@ -12,6 +12,7 @@ import {
   compactSizeLimit,
   resolveSizeProfile,
   type VideoProfile,
+  videoOutputExt,
   videoTargetSize,
 } from "@/lib/videoSettings";
 
@@ -21,7 +22,7 @@ export type OptimizeVideoParams = {
   preset: string;
   // Plafond de taille du résultat (voir videoTargetSize).
   profile: VideoProfile;
-  // Conserver la source à côté du résultat, renommée en <nom>.mkv.bkp.
+  // Conserver la source à côté du résultat, renommée en <nom>.<ext>.bkp.
   keepSource: boolean;
   onProgress?: (message: string) => void;
   // Avancement de l'encodage, en pourcentage (0-100).
@@ -56,7 +57,12 @@ type ProbeStream = {
 
 export type Probe = {
   streams: ProbeStream[];
-  format: { duration?: string; start_time?: string; tags?: Record<string, string> };
+  format: {
+    format_name?: string;
+    duration?: string;
+    start_time?: string;
+    tags?: Record<string, string>;
+  };
 };
 
 export type PacketStats = Map<number, { count: number; firstPts: number | null; lastPts: number | null }>;
@@ -85,6 +91,12 @@ const UNKNOWN_AUDIO_BPS = 640_000;
 // tolérance plus large sur le premier paquet vidéo seulement.
 const STREAM_PTS_TOLERANCE_S = 0.001;
 const VIDEO_FIRST_PTS_TOLERANCE_S = 0.25;
+// AVI : le conteneur ne stocke pas l'horodatage de chaque image (seulement
+// l'ordre de décodage) — ffprobe en déduit un approximatif, et les AVI
+// DivX/XviD à images B "packées" décalent les images d'une ou deux positions
+// (mesuré : 0,04 s, une image à 25 i/s). La piste vidéo y est comparée avec
+// cette tolérance (~2 images) et ne sert pas de référence aux autres pistes.
+const AVI_VIDEO_PTS_TOLERANCE_S = 0.1;
 const DURATION_TOLERANCE_S = 1;
 
 const STDERR_TAIL_BYTES = 4000;
@@ -197,8 +209,12 @@ function isMainVideo(stream: ProbeStream): boolean {
   return stream.codec_type === "video" && stream.disposition?.attached_pic !== 1;
 }
 
-// Les pistes "data" (rares, ex: timecodes) ne sont pas recopiées : le muxer
-// MKV ne sait pas les écrire. Tout le reste (vidéo, audio, sous-titres,
+function isAvi(probeResult: Probe): boolean {
+  return (probeResult.format.format_name ?? "").split(",").includes("avi");
+}
+
+// Les pistes "data" (rares, ex: timecodes, piste "tmcd" des MP4 de
+// caméscope) ne sont pas recopiées : le muxer MKV ne sait pas les écrire. Tout le reste (vidéo, audio, sous-titres,
 // pièces jointes) est conservé, dans le même ordre.
 function keptStreams(probeResult: Probe): ProbeStream[] {
   return probeResult.streams.filter((s) => s.codec_type !== "data");
@@ -237,6 +253,7 @@ export function verifyOutput(
 ): string[] {
   const problems: string[] = [];
   const expected = keptStreams(source);
+  const approxVideoPts = isAvi(source);
 
   if (output.streams.length !== expected.length) {
     return [`${expected.length} piste(s) attendue(s), ${output.streams.length} dans le résultat`];
@@ -255,7 +272,9 @@ export function verifyOutput(
   // Référence : le décalage partagé par le plus de pistes (un éventuel
   // décalage global du muxer les touche toutes) — c'est alors la piste qui
   // s'en écarte qui est signalée, pas toutes les autres.
-  const measured = shifts.filter((shift): shift is number => shift != null);
+  const measured = shifts.filter(
+    (shift, i): shift is number => shift != null && !(approxVideoPts && isMainVideo(expected[i]))
+  );
   const agreeing = (ref: number) =>
     measured.filter((shift) => Math.abs(shift - ref) <= STREAM_PTS_TOLERANCE_S).length;
   const refShift = measured.reduce(
@@ -281,13 +300,15 @@ export function verifyOutput(
       problems.push(`${label} : ${outStats?.count ?? 0} paquet(s) au lieu de ${srcStats?.count ?? 0}`);
     }
     const shift = shifts[i];
-    if (shift != null && Math.abs(shift - refShift) > STREAM_PTS_TOLERANCE_S) {
+    const tolerance = encoded && approxVideoPts ? AVI_VIDEO_PTS_TOLERANCE_S : STREAM_PTS_TOLERANCE_S;
+    if (shift != null && Math.abs(shift - refShift) > tolerance) {
       problems.push(`${label} : décalage relatif de ${(shift - refShift).toFixed(3)} s`);
     }
     if (encoded) {
       const a = srcStats?.firstPts;
       const b = outStats?.firstPts;
-      if (a != null && b != null && Math.abs(b - a - refShift) > VIDEO_FIRST_PTS_TOLERANCE_S) {
+      const firstTolerance = Math.max(VIDEO_FIRST_PTS_TOLERANCE_S, tolerance);
+      if (a != null && b != null && Math.abs(b - a - refShift) > firstTolerance) {
         problems.push(`${label} : première image décalée de ${(b - a - refShift).toFixed(3)} s`);
       }
     }
@@ -326,7 +347,46 @@ export function partPathFor(filePath: string): string {
   return `${filePath}${VIDEO_PART_SUFFIX}`;
 }
 
-// Ré-encode la piste vidéo d'un MKV en x265 (HEVC) pour gagner de la place,
+// Chemin du résultat : la source elle-même (MKV, MP4 : remplacée), ou le
+// même nom en .mkv pour un AVI (voir VIDEO_FORMATS).
+export function videoOutputPath(filePath: string): string {
+  const ext = path.extname(filePath);
+  const outExt = videoOutputExt(ext.slice(1));
+  if (ext.slice(1).toLowerCase() === outExt) return filePath;
+  return path.join(path.dirname(filePath), `${path.basename(filePath, ext)}.${outExt}`);
+}
+
+// Un AVI ne peut pas devenir film.mkv si un film.mkv existe déjà à côté
+// (autre version du même film ?) : jamais écrasé. null si rien ne bloque.
+export function outputConflict(filePath: string): string | null {
+  const outputPath = videoOutputPath(filePath);
+  if (outputPath === filePath || !fs.existsSync(/*turbopackIgnore: true*/ outputPath)) return null;
+  return `${path.basename(outputPath)} existe déjà à côté : le résultat ne peut pas prendre ce nom (renommer l'un des deux)`;
+}
+
+// Options du conteneur de sortie (voir videoOutputExt).
+function muxerArgs(outExt: string, source: Probe): string[] {
+  if (outExt !== "mp4") return ["-f", "matroska"];
+  const creationTime = source.format.tags?.creation_time;
+  return [
+    // hvc1 : identifiant HEVC attendu par les lecteurs Apple (QuickTime,
+    // iOS, Apple TV) ; l'identifiant par défaut (hev1) n'y est pas lu.
+    "-tag:v",
+    "hvc1",
+    // use_metadata_tags : le muxer MP4 n'écrit sinon que les métadonnées
+    // standard (titre, artiste...), pas le tag VIDEO_OPTIMIZED_TAG.
+    // faststart : index en tête de fichier, lecture immédiate en streaming.
+    "-movflags",
+    "+use_metadata_tags+faststart",
+    // Date de tournage : perdue sinon au ré-encodage (mesuré), alors que
+    // les photothèques et lecteurs s'en servent pour classer les vidéos.
+    ...(creationTime ? ["-metadata", `creation_time=${creationTime}`] : []),
+    "-f",
+    "mp4",
+  ];
+}
+
+// Ré-encode la piste vidéo d'un MKV/MP4/AVI en x265 (HEVC) pour gagner de la place,
 // en recopiant TOUTES les autres pistes à l'identique (audio, sous-titres,
 // pièces jointes, chapitres, métadonnées : jamais ré-encodées, jamais
 // retirées). -copyts conserve l'horodatage d'origine de chaque paquet (y
@@ -399,6 +459,7 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
   const plan = planVideo(source, originalSize, profile);
   const { durationS, sizeProfile, targetSize } = plan;
   const sourceCodecs = plan.codecs;
+  const outputPath = videoOutputPath(filePath);
   const startS = Number(source.format.start_time) || 0;
   const videoStreams = source.streams.filter(isMainVideo);
   if (profile === "auto") {
@@ -411,6 +472,9 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
     return { originalSize, optimizedSize: originalSize, finalPath: filePath };
   }
   if (plan.note) onProgress?.(`${plan.note} : ré-encodé`);
+  const conflict = outputConflict(filePath);
+  if (conflict) throw new Error(conflict);
+  if (outputPath !== filePath) onProgress?.(`converti en MKV : ${path.basename(outputPath)}`);
 
   const copiedBps = keptStreams(source)
     .filter((s) => !isMainVideo(s))
@@ -499,8 +563,7 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
         "-progress",
         "pipe:1",
         "-nostats",
-        "-f",
-        "matroska",
+        ...muxerArgs(path.extname(outputPath).slice(1), source),
         partPath,
       ],
       (line) => {
@@ -563,6 +626,23 @@ export async function optimizeVideo(params: OptimizeVideoParams): Promise<Optimi
     // Dernier point d'annulation : la suite (renommages) est synchrone et
     // quasi instantanée, jamais interrompue à moitié.
     signal?.throwIfAborted();
+
+    if (outputPath !== filePath) {
+      // AVI -> MKV : le résultat prend son propre nom (revérifié : un
+      // rename écraserait sans prévenir un fichier apparu entre-temps),
+      // puis seulement la source est mise de côté ou supprimée.
+      const lateConflict = outputConflict(filePath);
+      if (lateConflict) throw new Error(lateConflict);
+      fs.renameSync(partPath, outputPath);
+      if (keepSource) {
+        const backupPath = resolveBackupPath(filePath);
+        fs.renameSync(filePath, backupPath);
+        onProgress?.(`source conservée : ${path.basename(backupPath)}`);
+      } else {
+        fs.unlinkSync(filePath);
+      }
+      return { originalSize, optimizedSize, finalPath: outputPath };
+    }
 
     if (keepSource) {
       const backupPath = resolveBackupPath(filePath);

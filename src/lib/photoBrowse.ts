@@ -102,8 +102,13 @@ export function listPhotoEntries(relPath: string): BrowseEntry[] {
 // encodage vidéo de plusieurs heures par surprise) sous relPath
 // (sous-dossiers compris), chemins ABSOLUS — pour le scan en masse. Ignore
 // les dossiers "origin" (déjà des originaux préservés par un passage
-// précédent, jamais à ré-optimiser) et les caches Synology.
-export function listMediaRecursive(relPath: string, kind: JobKind): string[] {
+// précédent, jamais à ré-optimiser) et les caches Synology. extensions :
+// restreint à ces extensions (ex: seulement les MKV), toutes sinon.
+export function listMediaRecursive(
+  relPath: string,
+  kind: JobKind,
+  extensions?: ReadonlySet<string> | null
+): string[] {
   const root = resolvePhotoPath(relPath);
   const result: string[] = [];
 
@@ -116,7 +121,9 @@ export function listMediaRecursive(relPath: string, kind: JobKind): string[] {
         walk(full);
         continue;
       }
-      if (mediaKind(entry.name) === kind) result.push(full);
+      if (mediaKind(entry.name) !== kind) continue;
+      if (extensions && !extensions.has(path.extname(entry.name).slice(1).toLowerCase())) continue;
+      result.push(full);
     }
   }
 
