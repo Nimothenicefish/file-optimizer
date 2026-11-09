@@ -24,6 +24,7 @@ type Job = {
   quality: number;
   keep_original: number;
   force_jpeg: number;
+  convert_to: string | null;
   kind: string;
   video_crf: number | null;
   video_preset: string | null;
@@ -457,8 +458,12 @@ export default function JobsPage() {
               ) : (
                 <>
                   Taille max : {logJob?.max_dimension}px · Qualité : {logJob?.quality} · Conserve
-                  l&apos;original : {logJob?.keep_original ? "oui" : "non"} · Force JPG :{" "}
-                  {logJob?.force_jpeg ? "oui" : "non"}
+                  l&apos;original : {logJob?.keep_original ? "oui" : "non"} · Conversion :{" "}
+                  {logJob?.convert_to === "webp"
+                    ? "WebP"
+                    : logJob?.convert_to === "jpg" || logJob?.force_jpeg
+                      ? "JPG"
+                      : "aucune"}
                 </>
               )}
             </DialogDescription>

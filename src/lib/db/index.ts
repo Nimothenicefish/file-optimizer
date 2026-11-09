@@ -40,6 +40,10 @@ function createDb() {
       quality INTEGER NOT NULL,
       keep_original INTEGER NOT NULL DEFAULT 1,
       force_jpeg INTEGER NOT NULL DEFAULT 0,
+      -- Conversion forcée d'une photo ("jpg", "webp") ou NULL ; remplace
+      -- force_jpeg (gardé pour les jobs créés avant, et toujours renseigné
+      -- pour "jpg").
+      convert_to TEXT,
       kind TEXT NOT NULL DEFAULT 'image',
       video_crf INTEGER,
       video_preset TEXT,
@@ -106,6 +110,7 @@ function createDb() {
   `);
 
   ensureColumn(instance, "jobs", "force_jpeg", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(instance, "jobs", "convert_to", "TEXT");
   ensureColumn(instance, "jobs", "kind", "TEXT NOT NULL DEFAULT 'image'");
   ensureColumn(instance, "jobs", "video_crf", "INTEGER");
   ensureColumn(instance, "jobs", "video_preset", "TEXT");

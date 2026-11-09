@@ -41,7 +41,12 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { BatchEstimate } from "@/lib/eta";
-import { ELONGATED_RATIO } from "@/lib/imageLimits";
+import {
+  ELONGATED_RATIO,
+  type ImageConvertTarget,
+  WEBP_MAX_DIMENSION,
+  isImageConvertTarget,
+} from "@/lib/imageLimits";
 import type { AnalysisItem, AnalysisResult } from "@/lib/videoAnalysis";
 import { formatRemaining, formatSize } from "@/lib/format";
 import {
@@ -159,7 +164,7 @@ type StoredSettings = Partial<{
   maxDimension: number;
   quality: number;
   keepOriginal: boolean;
-  forceJpeg: boolean;
+  convertTo: ImageConvertTarget | null;
   videoCrf: number;
   videoPreset: VideoPreset;
   videoProfile: VideoProfile;
@@ -178,7 +183,14 @@ function loadStoredSettings(): StoredSettings {
       maxDimension: intIn(raw.maxDimension, 100, 20000),
       quality: intIn(raw.quality, 1, 100),
       keepOriginal: bool(raw.keepOriginal),
-      forceJpeg: bool(raw.forceJpeg),
+      // forceJpeg : réglage mémorisé par une version précédente.
+      convertTo: isImageConvertTarget(raw.convertTo)
+        ? raw.convertTo
+        : raw.convertTo === null
+          ? null
+          : raw.forceJpeg === true
+            ? "jpg"
+            : undefined,
       videoCrf: intIn(raw.videoCrf, 0, 51),
       videoPreset: isVideoPreset(raw.videoPreset) ? raw.videoPreset : undefined,
       videoProfile: isVideoProfile(raw.videoProfile) ? raw.videoProfile : undefined,
@@ -240,7 +252,8 @@ export default function BrowsePage() {
   const [maxDimension, setMaxDimension] = useState(4000);
   const [quality, setQuality] = useState(85);
   const [keepOriginal, setKeepOriginal] = useState(true);
-  const [forceJpeg, setForceJpeg] = useState(false);
+  // Conversion forcée des photos : JPG, WebP ou aucune (jamais les deux).
+  const [convertTo, setConvertTo] = useState<ImageConvertTarget | null>(null);
 
   // Mode "Photos" ou "Vidéos" : détermine ce qui est sélectionnable/
   // scanné et les réglages affichés — jamais les deux à la fois, pour qu'un
@@ -413,7 +426,7 @@ export default function BrowsePage() {
     maxDimension,
     quality,
     keepOriginal,
-    forceJpeg,
+    convertTo,
     videoCrf,
     videoPreset,
     videoProfile,
@@ -431,7 +444,7 @@ export default function BrowsePage() {
     if (stored.maxDimension != null) setMaxDimension(stored.maxDimension);
     if (stored.quality != null) setQuality(stored.quality);
     if (stored.keepOriginal != null) setKeepOriginal(stored.keepOriginal);
-    if (stored.forceJpeg != null) setForceJpeg(stored.forceJpeg);
+    if (stored.convertTo !== undefined) setConvertTo(stored.convertTo);
     if (stored.videoCrf != null) setVideoCrf(stored.videoCrf);
     if (stored.videoPreset) setVideoPreset(stored.videoPreset);
     if (stored.videoProfile) setVideoProfile(stored.videoProfile);
@@ -450,7 +463,7 @@ export default function BrowsePage() {
     maxDimension,
     quality,
     keepOriginal,
-    forceJpeg,
+    convertTo,
     videoCrf,
     videoPreset,
     videoProfile,
@@ -711,9 +724,20 @@ export default function BrowsePage() {
               <Checkbox checked={keepOriginal} onCheckedChange={(c) => setKeepOriginal(c === true)} />
               Conserver les originaux (dossier &quot;origin&quot;)
             </Label>
+            {/* Deux cases mais un seul choix : cocher l'une décoche l'autre. */}
             <Label className="flex items-center gap-2 pb-1.5">
-              <Checkbox checked={forceJpeg} onCheckedChange={(c) => setForceJpeg(c === true)} />
+              <Checkbox
+                checked={convertTo === "jpg"}
+                onCheckedChange={(c) => setConvertTo(c === true ? "jpg" : null)}
+              />
               Forcer la conversion en JPG
+            </Label>
+            <Label className="flex items-center gap-2 pb-1.5">
+              <Checkbox
+                checked={convertTo === "webp"}
+                onCheckedChange={(c) => setConvertTo(c === true ? "webp" : null)}
+              />
+              Forcer la conversion en WebP
             </Label>
           </div>
           <p className="text-xs text-muted-foreground">
@@ -721,11 +745,19 @@ export default function BrowsePage() {
             webtoon/manga, captures défilantes, panoramas) : la taille max s&apos;applique à leur plus
             petit côté, pour ne jamais rendre le contenu flou ou le texte illisible.
           </p>
-          {forceJpeg && (
+          {convertTo === "jpg" && (
             <p className="text-xs text-muted-foreground">
               Convertit les PNG/WebP/AVIF en JPG (gain de place quasi garanti grâce à la compression
               à perte, mais perd la transparence éventuelle — fond blanc à la place). Sans effet sur
               un fichier déjà en JPEG.
+            </p>
+          )}
+          {convertTo === "webp" && (
+            <p className="text-xs text-muted-foreground">
+              Convertit les JPG/PNG/AVIF en WebP (en général plus léger que le JPG à qualité égale,
+              et garde la transparence). Une photo dont le WebP serait plus lourd, ou de plus de{" "}
+              {WEBP_MAX_DIMENSION} px de long (limite du format), reste dans son format. Le WebP se lit
+              partout aujourd&apos;hui, mais pas forcément dans de vieux logiciels.
             </p>
           )}
         </div>

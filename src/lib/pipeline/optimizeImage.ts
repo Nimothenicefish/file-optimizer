@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
-import { MAX_INPUT_PIXELS, planResize } from "@/lib/imageLimits";
+import {
+  type ImageConvertTarget,
+  MAX_INPUT_PIXELS,
+  WEBP_MAX_DIMENSION,
+  planResize,
+} from "@/lib/imageLimits";
 import { ORIGIN_FOLDER_NAME } from "@/lib/naming";
 
 export type OptimizeImageParams = {
@@ -9,7 +14,8 @@ export type OptimizeImageParams = {
   maxDimension: number;
   quality: number;
   keepOriginal: boolean;
-  forceJpeg?: boolean;
+  // Conversion forcée (JPG ou WebP), ou null/absent : format conservé.
+  convertTo?: ImageConvertTarget | null;
   onProgress?: (message: string) => void;
   // Annulation : vérifiée avant toute écriture — le décodage/encodage sharp
   // lui-même (quelques secondes) n'est pas interruptible, mais la photo
@@ -21,13 +27,13 @@ export type OptimizeImageResult = {
   originalSize: number;
   optimizedSize: number;
   // Chemin final du fichier (identique à filePath, sauf conversion forcée en
-  // JPG d'une source dans un autre format : l'extension change alors).
+  // JPG/WebP d'une source dans un autre format : l'extension change alors).
   finalPath: string;
 };
 
 const JPEG_EXTS = new Set(["jpg", "jpeg"]);
 
-// Chemin de sortie si le format change (conversion forcée en JPG) : même nom,
+// Chemin de sortie si le format change (conversion forcée) : même nom,
 // nouvelle extension, en évitant toute collision avec un fichier déjà présent
 // (ex: photo.png ET photo.jpg existaient déjà tous les deux).
 function resolveOutputPath(filePath: string, targetExt: string): string {
@@ -76,11 +82,13 @@ function moveToOriginFolder(filePath: string): void {
 // source — voir src/lib/imageLimits.ts) et ré-encode dans SON PROPRE format
 // (jamais de conversion vers un format universel, pour ne jamais perdre la
 // transparence d'un PNG ni changer l'extension/contenu d'un fichier) — sauf
-// si forceJpeg est demandé explicitement : conversion en JPG garantissant
-// dans certains cas un gain de place (compression à perte plus agressive
-// qu'un PNG recompressé sans perte), au prix de la transparence éventuelle.
+// si une conversion est demandée explicitement (convertTo) :
+// - JPG : gain de place quasi garanti sur un PNG (compression à perte plus
+//   agressive qu'un PNG recompressé sans perte), au prix de la transparence ;
+// - WebP : en général plus compact que le JPG à qualité égale, et garde la
+//   transparence.
 export async function optimizeImage(params: OptimizeImageParams): Promise<OptimizeImageResult> {
-  const { filePath, maxDimension, quality, keepOriginal, forceJpeg = false, onProgress, signal } =
+  const { filePath, maxDimension, quality, keepOriginal, convertTo = null, onProgress, signal } =
     params;
 
   const originalBuffer = fs.readFileSync(filePath);
@@ -110,11 +118,26 @@ export async function optimizeImage(params: OptimizeImageParams): Promise<Optimi
   }
 
   const sourceExt = path.extname(filePath).slice(1).toLowerCase();
-  // Forcer en JPG n'a de sens que si la source n'est pas déjà un JPEG —
-  // sinon on garde juste le ré-encodage normal (pas de renommage inutile
+  // Une conversion n'a de sens que si la source n'est pas déjà dans le
+  // format visé — sinon simple ré-encodage normal (pas de renommage inutile
   // .jpeg -> .jpg).
-  const targetExt = forceJpeg && !JPEG_EXTS.has(sourceExt) ? "jpg" : sourceExt;
-  const convertingToJpeg = targetExt !== sourceExt;
+  let targetExt = sourceExt;
+  if (convertTo === "jpg" && !JPEG_EXTS.has(sourceExt)) targetExt = "jpg";
+  if (convertTo === "webp" && sourceExt !== "webp") {
+    const scale = resizePlan
+      ? maxDimension / (resizePlan.side === "width" ? metadata.width! : metadata.height!)
+      : 1;
+    const longest = Math.round(Math.max(metadata.width ?? 0, metadata.height ?? 0) * scale);
+    if (longest > WEBP_MAX_DIMENSION) {
+      onProgress?.(
+        `trop grande pour le WebP (${longest}px, ${WEBP_MAX_DIMENSION}px au plus) : format d'origine conservé`
+      );
+    } else {
+      targetExt = "webp";
+    }
+  }
+  const convertingToJpeg = targetExt === "jpg" && targetExt !== sourceExt;
+  if (targetExt !== sourceExt) onProgress?.(`ré-encodage en ${targetExt === "jpg" ? "JPG" : "WebP"} (conversion demandée)`);
 
   let output: Buffer;
   switch (targetExt) {
@@ -173,7 +196,7 @@ export async function optimizeImage(params: OptimizeImageParams): Promise<Optimi
   fs.renameSync(tmpPath, outputPath);
 
   if (!keepOriginal && outputPath !== filePath) {
-    // Le format a changé (conversion forcée en JPG) : l'ancien fichier
+    // Le format a changé (conversion forcée) : l'ancien fichier
     // (autre extension) doit disparaître, sinon il reste en double à côté
     // du nouveau.
     fs.unlinkSync(filePath);

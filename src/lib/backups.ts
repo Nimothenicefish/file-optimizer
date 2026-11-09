@@ -63,12 +63,13 @@ function findOptimized(backupPath: string): string | null {
     return candidates.map((c) => path.join(dir, c)).find((c) => fileSize(c) != null) ?? null;
   }
 
-  // Original photo : <dossier>/origin/<nom> -> <dossier>/<nom>, ou en .jpg
-  // si la conversion forcée en JPG était active.
+  // Original photo : <dossier>/origin/<nom> -> <dossier>/<nom>, ou en
+  // .jpg/.webp si une conversion forcée était active.
   const parent = path.dirname(dir);
   const stripped = withoutCollisionSuffix(name) ?? name;
   for (const base of new Set([name, stripped])) {
-    candidates.push(base, `${path.basename(base, path.extname(base))}.jpg`);
+    const stem = path.basename(base, path.extname(base));
+    candidates.push(base, `${stem}.jpg`, `${stem}.webp`);
   }
   return candidates.map((c) => path.join(parent, c)).find((c) => fileSize(c) != null) ?? null;
 }

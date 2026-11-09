@@ -40,6 +40,9 @@ beforeAll(async () => {
   write("Vacances/b.jpg", 10);
   write("Vacances/origin/b.png", 60);
   write("Vacances/origin/c.jpg", 70);
+  // Original converti en WebP.
+  write("Vacances/d.webp", 10);
+  write("Vacances/origin/d.png", 55);
   // Ni l'un ni l'autre : jamais listés ni supprimables.
   write("Vacances/notes.txt", 5);
   write("Films/bande-annonce.mov.bkp", 5);
@@ -60,6 +63,7 @@ describe("listBackups — sauvegardes de l'app et leur fichier optimisé", () =>
       ["Films/perdu.mkv.bkp", null],
       ["Vacances/origin/c.jpg", null],
       ["Vacances/origin/b.png", "Vacances/b.jpg"],
+      ["Vacances/origin/d.png", "Vacances/d.webp"],
       ["Vacances/origin/a.jpg", "Vacances/a.jpg"],
     ]);
   });
@@ -83,8 +87,14 @@ describe("deleteBackups — tout est revérifié côté serveur", () => {
   });
 
   it("supprime les sauvegardes vérifiables, retire le dossier origin/ vidé, ne touche jamais au résultat", () => {
-    const outcome = backups.deleteBackups(["Films/film.mkv.bkp", "Vacances/origin/a.jpg", "Vacances/origin/b.png"]);
-    expect(outcome).toMatchObject({ deleted: 3, freedBytes: 510, refused: [] });
+    const outcome = backups.deleteBackups([
+      "Films/film.mkv.bkp",
+      "Vacances/origin/a.jpg",
+      "Vacances/origin/b.png",
+      "Vacances/origin/d.png",
+    ]);
+    expect(outcome).toMatchObject({ deleted: 4, freedBytes: 565, refused: [] });
+    expect(exists("Vacances/d.webp")).toBe(true);
     expect(exists("Films/film.mkv")).toBe(true);
     expect(exists("Vacances/a.jpg")).toBe(true);
     // c.jpg (orphelin) reste : origin/ n'est pas vide, donc conservé.

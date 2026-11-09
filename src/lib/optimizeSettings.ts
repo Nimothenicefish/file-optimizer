@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_DIMENSION, DEFAULT_QUALITY } from "@/lib/imageLimits";
+import { DEFAULT_MAX_DIMENSION, DEFAULT_QUALITY, isImageConvertTarget } from "@/lib/imageLimits";
 import type { EnqueueParams, JobKind } from "@/lib/queue/jobs";
 import {
   DEFAULT_VIDEO_CRF,
@@ -27,7 +27,9 @@ export function parseOptimizeSettings(body: Record<string, unknown> | null): Opt
     maxDimension: clampInt(body?.maxDimension, DEFAULT_MAX_DIMENSION, 100, 20000),
     quality: clampInt(body?.quality, DEFAULT_QUALITY, 1, 100),
     keepOriginal: body?.keepOriginal !== false,
-    forceJpeg: body?.forceJpeg === true,
+    // forceJpeg : ancien champ (onglet resté ouvert sur une version
+    // précédente de l'UI).
+    convertTo: isImageConvertTarget(body?.convertTo) ? body.convertTo : body?.forceJpeg === true ? "jpg" : null,
     videoCrf: clampInt(body?.videoCrf, DEFAULT_VIDEO_CRF, 0, 51),
     videoPreset: isVideoPreset(body?.videoPreset) ? body.videoPreset : DEFAULT_VIDEO_PRESET,
     videoProfile: isVideoProfile(body?.videoProfile) ? body.videoProfile : DEFAULT_VIDEO_PROFILE,

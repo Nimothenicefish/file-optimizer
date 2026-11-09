@@ -16,6 +16,20 @@ export const MAX_INPUT_PIXELS = 2_000_000_000;
 
 export const DEFAULT_QUALITY = 85;
 
+// Conversion forcée d'une photo vers un autre format (une seule cible à la
+// fois, ou aucune : chaque photo est alors ré-encodée dans son propre
+// format) — voir src/lib/pipeline/optimizeImage.ts.
+export const IMAGE_CONVERT_TARGETS = ["jpg", "webp"] as const;
+export type ImageConvertTarget = (typeof IMAGE_CONVERT_TARGETS)[number];
+
+export function isImageConvertTarget(value: unknown): value is ImageConvertTarget {
+  return typeof value === "string" && (IMAGE_CONVERT_TARGETS as readonly string[]).includes(value);
+}
+
+// Plus grand côté qu'un WebP peut avoir (limite du format) : au-delà
+// (bande de webtoon très longue), la photo garde son format d'origine.
+export const WEBP_MAX_DIMENSION = 16383;
+
 // Au-delà de ce rapport longueur/largeur, une image est "très allongée"
 // (bande de webtoon/manga, capture d'écran défilante, panorama) : la taille
 // max s'applique alors à son PLUS PETIT côté. Appliquée au plus grand, elle

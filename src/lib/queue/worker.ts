@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { db } from "@/lib/db";
+import { isImageConvertTarget } from "@/lib/imageLimits";
 import { optimizeImage } from "@/lib/pipeline/optimizeImage";
 import { optimizeVideo, partPathFor } from "@/lib/pipeline/optimizeVideo";
 import { isCancelRequested } from "@/lib/queue/jobs";
@@ -23,6 +24,7 @@ type JobRow = {
   quality: number;
   keep_original: number;
   force_jpeg: number;
+  convert_to: string | null;
   kind: string;
   video_crf: number | null;
   video_preset: string | null;
@@ -112,7 +114,8 @@ function runOptimization(job: JobRow, signal: AbortSignal, freezer: VideoFreezer
     maxDimension: job.max_dimension,
     quality: job.quality,
     keepOriginal: job.keep_original === 1,
-    forceJpeg: job.force_jpeg === 1,
+    // force_jpeg : jobs créés avant convert_to.
+    convertTo: isImageConvertTarget(job.convert_to) ? job.convert_to : job.force_jpeg === 1 ? "jpg" : null,
     signal,
     onProgress,
   });

@@ -89,7 +89,7 @@ describe("optimizeImage — conserve le format d'origine (pas de conversion vers
   });
 });
 
-describe("optimizeImage — forceJpeg : conversion forcée en JPG", () => {
+describe("optimizeImage — convertTo jpg : conversion forcée en JPG", () => {
   it("convertit un PNG avec transparence en JPG (fond blanc) et supprime l'ancien fichier", async () => {
     const dir = mkTempDir();
     const filePath = path.join(dir, "graphic.png");
@@ -114,7 +114,7 @@ describe("optimizeImage — forceJpeg : conversion forcée en JPG", () => {
       maxDimension: 2000,
       quality: 85,
       keepOriginal: false,
-      forceJpeg: true,
+      convertTo: "jpg",
     });
 
     const jpgPath = path.join(dir, "graphic.jpg");
@@ -145,7 +145,7 @@ describe("optimizeImage — forceJpeg : conversion forcée en JPG", () => {
       maxDimension: 2000,
       quality: 85,
       keepOriginal: true,
-      forceJpeg: true,
+      convertTo: "jpg",
     });
 
     expect(fs.existsSync(path.join(dir, "origin", "graphic.png"))).toBe(true);
@@ -165,7 +165,7 @@ describe("optimizeImage — forceJpeg : conversion forcée en JPG", () => {
       maxDimension: 2000,
       quality: 85,
       keepOriginal: false,
-      forceJpeg: true,
+      convertTo: "jpg",
     });
 
     expect(result.finalPath).toBe(filePath);
@@ -189,7 +189,7 @@ describe("optimizeImage — forceJpeg : conversion forcée en JPG", () => {
       maxDimension: 2000,
       quality: 85,
       keepOriginal: false,
-      forceJpeg: true,
+      convertTo: "jpg",
     });
 
     expect(result.finalPath).toBe(path.join(dir, "graphic_1.jpg"));
@@ -210,7 +210,7 @@ describe("optimizeImage — forceJpeg : conversion forcée en JPG", () => {
       maxDimension: 2000,
       quality: 85,
       keepOriginal: false,
-      forceJpeg: true,
+      convertTo: "jpg",
     });
 
     expect(result.finalPath).toBe(filePath);
@@ -338,7 +338,7 @@ describe("optimizeImage — annulation", () => {
         maxDimension: 1000,
         quality: 80,
         keepOriginal: true,
-        forceJpeg: true,
+        convertTo: "jpg",
         signal: controller.signal,
       })
     ).rejects.toThrow();
@@ -389,5 +389,73 @@ describe("optimizeImage — bandes verticales (720x15000)", () => {
 
     const meta = await sharp(fs.readFileSync(filePath)).metadata();
     expect([meta.width, meta.height]).toEqual([2000, 8000]);
+  });
+});
+
+describe("optimizeImage — convertTo webp : conversion forcée en WebP", () => {
+  // Photo "réaliste" (dégradé + bruit léger) : un WebP qualité 80 y est
+  // nettement plus léger qu'un JPEG qualité 95.
+  async function makeJpeg(filePath: string, width: number, height: number) {
+    const raw = Buffer.alloc(width * height * 3);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 3;
+        raw[i] = (x * 255) / width + Math.random() * 20;
+        raw[i + 1] = (y * 255) / height + Math.random() * 20;
+        raw[i + 2] = 128 + Math.random() * 20;
+      }
+    }
+    await sharp(raw, { raw: { width, height, channels: 3 } }).jpeg({ quality: 95 }).toFile(filePath);
+  }
+
+  it("convertit un JPG en WebP du même nom et supprime l'ancien fichier", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "photo.jpg");
+    await makeJpeg(filePath, 800, 600);
+
+    const result = await optimizeImage({ filePath, maxDimension: 2000, quality: 80, keepOriginal: false, convertTo: "webp" });
+
+    const webpPath = path.join(dir, "photo.webp");
+    expect(result.finalPath).toBe(webpPath);
+    expect(fs.existsSync(filePath)).toBe(false);
+    expect((await sharp(fs.readFileSync(webpPath)).metadata()).format).toBe("webp");
+  });
+
+  it("garde la transparence d'un PNG (pas d'aplatissement comme pour le JPG)", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "logo.png");
+    const width = 300;
+    const height = 300;
+    const raw = Buffer.alloc(width * height * 4);
+    for (let i = 0; i < raw.length; i++) raw[i] = Math.floor(Math.random() * 256);
+    await sharp(raw, { raw: { width, height, channels: 4 } }).png().toFile(filePath);
+
+    const result = await optimizeImage({ filePath, maxDimension: 2000, quality: 80, keepOriginal: true, convertTo: "webp" });
+
+    expect(result.finalPath).toBe(path.join(dir, "logo.webp"));
+    const meta = await sharp(fs.readFileSync(result.finalPath)).metadata();
+    expect(meta.format).toBe("webp");
+    expect(meta.hasAlpha).toBe(true);
+    expect(fs.existsSync(path.join(dir, "origin", "logo.png"))).toBe(true);
+  });
+
+  it("une bande trop longue pour le WebP (> 16383 px) garde son format", async () => {
+    const dir = mkTempDir();
+    const filePath = path.join(dir, "webtoon.jpg");
+    await makeJpeg(filePath, 200, 17000);
+    const messages: string[] = [];
+
+    const result = await optimizeImage({
+      filePath,
+      maxDimension: 4000,
+      quality: 80,
+      keepOriginal: false,
+      convertTo: "webp",
+      onProgress: (m) => messages.push(m),
+    });
+
+    expect(result.finalPath).toBe(filePath);
+    expect((await sharp(fs.readFileSync(filePath)).metadata()).format).toBe("jpeg");
+    expect(messages.join("\n")).toContain("trop grande pour le WebP");
   });
 });

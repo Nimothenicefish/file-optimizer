@@ -97,6 +97,21 @@ describe("POST /api/scan — scan récursif", () => {
       .get(data.ids[0]) as { force_jpeg: number };
     expect(row.force_jpeg).toBe(1);
   });
+
+  it("propage convertTo: 'webp' jusqu'au job créé (jamais en même temps que JPG)", async () => {
+    fs.mkdirSync(path.join(photosDir, "album3"), { recursive: true });
+    await sharp({ create: { width: 200, height: 200, channels: 3, background: { r: 7, g: 8, b: 9 } } })
+      .png()
+      .toFile(path.join(photosDir, "album3", "photo4.png"));
+
+    const res = await scanRequest({ path: "album3", convertTo: "webp", forceJpeg: true });
+    const data = await res.json();
+
+    const row = db
+      .prepare("SELECT force_jpeg, convert_to FROM jobs WHERE id = ?")
+      .get(data.ids[0]) as { force_jpeg: number; convert_to: string | null };
+    expect(row).toEqual({ force_jpeg: 0, convert_to: "webp" });
+  });
 });
 
 describe("GET /api/jobs — recap par statut", () => {

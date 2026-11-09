@@ -57,7 +57,7 @@ describe("arrêt propre du conteneur pendant un encodage", () => {
         maxDimension: 0,
         quality: 0,
         keepOriginal: false,
-        forceJpeg: false,
+        convertTo: null,
         videoCrf: 22,
         videoPreset: "slow",
         videoProfile: "film",

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
+import type { ImageConvertTarget } from "@/lib/imageLimits";
 
 export type JobKind = "image" | "video";
 
@@ -11,7 +12,8 @@ export type EnqueueParams = {
   // Photo : déplacer l'original dans origin/. Vidéo : conserver la source
   // renommée en <nom>.<ext>.bkp.
   keepOriginal: boolean;
-  forceJpeg: boolean;
+  // Photo : conversion forcée en JPG ou WebP, ou null (format conservé).
+  convertTo: ImageConvertTarget | null;
   videoCrf: number;
   videoPreset: string;
   videoProfile: string;
@@ -29,8 +31,8 @@ export function enqueueFiles(files: EnqueueParams[]): EnqueueOutcome {
   );
   const insert = db.prepare(
     `INSERT INTO jobs (id, file_path, kind, status, max_dimension, quality, keep_original, force_jpeg,
-                       video_crf, video_preset, video_profile)
-     VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`
+                       convert_to, video_crf, video_preset, video_profile)
+     VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   let queued = 0;
@@ -51,7 +53,8 @@ export function enqueueFiles(files: EnqueueParams[]): EnqueueOutcome {
       file.maxDimension,
       file.quality,
       file.keepOriginal ? 1 : 0,
-      file.forceJpeg ? 1 : 0,
+      file.convertTo === "jpg" ? 1 : 0,
+      isVideo ? null : file.convertTo,
       isVideo ? file.videoCrf : null,
       isVideo ? file.videoPreset : null,
       isVideo ? file.videoProfile : null
