@@ -134,7 +134,9 @@ function runProcess(
     const [prefix, ...prefixArgs] = LOW_PRIORITY_PREFIX;
     // nice et ionice remplacent leur propre process par la commande (exec) :
     // le pid de "child" est bien celui d'ffmpeg/ffprobe une fois lancé.
-    const child = spawn(prefix, [...prefixArgs, command, ...args], {
+    // turbopackIgnore : commande système (nice -> ffmpeg/ffprobe), jamais un
+    // fichier du projet à embarquer.
+    const child = spawn(/*turbopackIgnore: true*/ prefix, [...prefixArgs, command, ...args], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     // SIGKILL direct plutôt que SIGTERM : sur SIGTERM, ffmpeg vide d'abord
@@ -353,7 +355,7 @@ export function videoOutputPath(filePath: string): string {
   const ext = path.extname(filePath);
   const outExt = videoOutputExt(ext.slice(1));
   if (ext.slice(1).toLowerCase() === outExt) return filePath;
-  return path.join(path.dirname(filePath), `${path.basename(filePath, ext)}.${outExt}`);
+  return path.join(/*turbopackIgnore: true*/ path.dirname(filePath), `${path.basename(filePath, ext)}.${outExt}`);
 }
 
 // Un AVI ne peut pas devenir film.mkv si un film.mkv existe déjà à côté

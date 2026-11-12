@@ -1,0 +1,15 @@
+# Jamais dans le contexte de build Docker : dépendances et build locaux
+# (refaits dans l'image), et surtout les données locales — une base
+# data/app.db copiée serait ouverte par le build (et embarquée dans l'image),
+# tout comme les secrets des fichiers .env.
+.git
+node_modules
+.next
+coverage
+data
+photos
+files
+.env*
+!.env.example
+*.tsbuildinfo
+npm-debug.log*

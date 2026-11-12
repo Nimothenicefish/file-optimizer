@@ -12,11 +12,17 @@ declare global {
 // Ajoute une colonne à une table existante si elle n'y est pas déjà — pour
 // une base déployée AVANT l'ajout de cette colonne (le CREATE TABLE IF NOT
 // EXISTS ci-dessous ne modifie jamais une table déjà créée). Sans danger à
-// rappeler à chaque démarrage : no-op si la colonne existe déjà.
+// rappeler à chaque démarrage : no-op si la colonne existe déjà. Plusieurs
+// process peuvent ouvrir la même base en même temps (ex: les workers de
+// "next build") : celui qui perd la course voit "duplicate column name",
+// sans conséquence — la colonne est bien là.
 function ensureColumn(instance: Database.Database, table: string, column: string, definition: string) {
   const columns = instance.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  if (!columns.some((c) => c.name === column)) {
+  if (columns.some((c) => c.name === column)) return;
+  try {
     instance.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  } catch (err) {
+    if (!(err instanceof Error && err.message.includes("duplicate column name"))) throw err;
   }
 }
 
