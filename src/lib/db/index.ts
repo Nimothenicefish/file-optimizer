@@ -27,9 +27,20 @@ function ensureColumn(instance: Database.Database, table: string, column: string
 }
 
 function createDb() {
+  // Pendant "next build", les workers (un par cœur) importent les routes et
+  // donc ce module en parallèle : sur une base neuve, le passage en WAL de
+  // l'un échoue en "database is locked" pour les autres. Le build n'a pas
+  // besoin de vraie base : une base en mémoire, propre à chaque worker.
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return initSchema(new Database(":memory:"));
+  }
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const instance = new Database(DB_PATH);
   instance.pragma("journal_mode = WAL");
+  return initSchema(instance);
+}
+
+function initSchema(instance: Database.Database) {
 
   instance.exec(`
     -- Un job = un fichier (photo ou vidéo, voir "kind") à optimiser. Les
