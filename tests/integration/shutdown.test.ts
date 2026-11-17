@@ -61,6 +61,7 @@ describe("arrêt propre du conteneur pendant un encodage", () => {
         videoCrf: 22,
         videoPreset: "slow",
         videoProfile: "film",
+        audioQuality: "v0",
       },
     ]);
     const row = () =>

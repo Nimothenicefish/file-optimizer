@@ -5,14 +5,14 @@ import { enqueueFiles } from "@/lib/queue/worker";
 import { parseVideoFormats } from "@/lib/videoSettings";
 
 // Scanne récursivement un dossier (sous-dossiers compris) et met en file
-// tous les fichiers du mode choisi ("image" par défaut, ou "video") —
+// tous les fichiers du mode choisi ("image" par défaut, "video" ou "audio") —
 // formats pris en charge, voir photoBrowse.ts — pour "optimiser tout ce
 // qu'il y a dans ce dossier" sans sélection manuelle (en mode vidéo,
 // éventuellement restreint à certains formats).
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const relPath = typeof body?.path === "string" ? body.path : "";
-  const kind = body?.mode === "video" ? "video" : "image";
+  const kind = body?.mode === "video" ? "video" : body?.mode === "audio" ? "audio" : "image";
   const settings = parseOptimizeSettings(body);
   // Vidéos : formats cochés dans l'UI (MKV, MP4, AVI), tous par défaut.
   const formats = kind === "video" ? parseVideoFormats(body?.videoFormats) : null;

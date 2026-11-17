@@ -1,22 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
+import type { AudioQuality } from "@/lib/audioSettings";
 import type { ImageConvertTarget } from "@/lib/imageLimits";
 
-export type JobKind = "image" | "video";
+export type JobKind = "image" | "video" | "audio";
 
 export type EnqueueParams = {
   filePath: string; // chemin absolu réel sur disque
   kind: JobKind;
   maxDimension: number;
   quality: number;
-  // Photo : déplacer l'original dans origin/. Vidéo : conserver la source
-  // renommée en <nom>.<ext>.bkp.
+  // Photo : déplacer l'original dans origin/. Vidéo, musique : conserver la
+  // source renommée en <nom>.<ext>.bkp.
   keepOriginal: boolean;
   // Photo : conversion forcée en JPG ou WebP, ou null (format conservé).
   convertTo: ImageConvertTarget | null;
   videoCrf: number;
   videoPreset: string;
   videoProfile: string;
+  audioQuality: AudioQuality;
 };
 
 export type EnqueueOutcome = { queued: number; skippedAlreadyQueued: number; ids: string[] };
@@ -31,8 +33,8 @@ export function enqueueFiles(files: EnqueueParams[]): EnqueueOutcome {
   );
   const insert = db.prepare(
     `INSERT INTO jobs (id, file_path, kind, status, max_dimension, quality, keep_original, force_jpeg,
-                       convert_to, video_crf, video_preset, video_profile)
-     VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`
+                       convert_to, video_crf, video_preset, video_profile, audio_quality)
+     VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   let queued = 0;
@@ -46,6 +48,7 @@ export function enqueueFiles(files: EnqueueParams[]): EnqueueOutcome {
     }
     const id = randomUUID();
     const isVideo = file.kind === "video";
+    const isImage = file.kind === "image";
     insert.run(
       id,
       file.filePath,
@@ -53,11 +56,12 @@ export function enqueueFiles(files: EnqueueParams[]): EnqueueOutcome {
       file.maxDimension,
       file.quality,
       file.keepOriginal ? 1 : 0,
-      file.convertTo === "jpg" ? 1 : 0,
-      isVideo ? null : file.convertTo,
+      isImage && file.convertTo === "jpg" ? 1 : 0,
+      isImage ? file.convertTo : null,
       isVideo ? file.videoCrf : null,
       isVideo ? file.videoPreset : null,
-      isVideo ? file.videoProfile : null
+      isVideo ? file.videoProfile : null,
+      file.kind === "audio" ? file.audioQuality : null
     );
     ids.push(id);
     queued++;

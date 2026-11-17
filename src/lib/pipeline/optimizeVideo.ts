@@ -36,7 +36,7 @@ export type OptimizeVideoParams = {
   onProcess?: (child: ChildProcess | null) => void;
 };
 
-type ProcessControl = Pick<OptimizeVideoParams, "signal" | "onProcess">;
+export type ProcessControl = Pick<OptimizeVideoParams, "signal" | "onProcess">;
 
 export type OptimizeVideoResult = {
   originalSize: number;
@@ -104,7 +104,7 @@ const STDERR_TAIL_BYTES = 4000;
 // Espace disque laissé libre en permanence sur le volume, en plus du fichier
 // temporaire d'encodage : un NAS dont le volume se remplit à 100 % peut
 // devenir instable (DSM, autres services), bien au-delà de cette app.
-const DISK_RESERVE_BYTES = 2 * 1024 ** 3;
+export const DISK_RESERVE_BYTES = 2 * 1024 ** 3;
 
 // ffmpeg/ffprobe tournent avec la priorité CPU la plus basse (nice 19) et la
 // classe d'E/S disque "idle" (ionice -c 3 : n'accède au disque que quand
@@ -123,7 +123,7 @@ class ProcessError extends Error {}
 // le process est arrêté et la promesse rejetée seulement une fois qu'il est
 // réellement terminé : jamais deux encodages simultanés sur le NAS, ni de
 // fichier temporaire supprimé pendant qu'ffmpeg écrit encore dedans.
-function runProcess(
+export function runProcess(
   command: string,
   args: string[],
   onLine: (line: string) => void,
@@ -329,7 +329,7 @@ export function verifyOutput(
 
 // <dossier>/<nom>.mkv.bkp, ou <nom>_1.mkv.bkp, <nom>_2.mkv.bkp... si une
 // sauvegarde d'un passage précédent existe déjà — jamais écrasée.
-function resolveBackupPath(filePath: string): string {
+export function resolveBackupPath(filePath: string): string {
   const dir = path.dirname(filePath);
   const ext = path.extname(filePath);
   const base = path.basename(filePath, ext);

@@ -65,6 +65,8 @@ function initSchema(instance: Database.Database) {
       video_crf INTEGER,
       video_preset TEXT,
       video_profile TEXT,
+      -- Qualité MP3 d'une conversion FLAC -> MP3 (voir audioSettings.ts).
+      audio_quality TEXT,
       -- Avancement (0-100) d'un encodage vidéo en cours ; NULL pour une photo.
       progress REAL,
       -- Annulation demandée pour un job "running" (voir cancelJobs dans
@@ -132,6 +134,7 @@ function initSchema(instance: Database.Database) {
   ensureColumn(instance, "jobs", "video_crf", "INTEGER");
   ensureColumn(instance, "jobs", "video_preset", "TEXT");
   ensureColumn(instance, "jobs", "video_profile", "TEXT");
+  ensureColumn(instance, "jobs", "audio_quality", "TEXT");
   ensureColumn(instance, "jobs", "progress", "REAL");
   ensureColumn(instance, "jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(instance, "jobs", "started_at", "INTEGER");

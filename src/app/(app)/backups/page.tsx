@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Film, Image as ImageIcon, Loader2, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
+import { Film, Image as ImageIcon, Loader2, Music, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -87,7 +87,7 @@ export default function BackupsPage() {
       <div>
         <h2 className="text-lg font-semibold tracking-tight">Sauvegardes</h2>
         <p className="text-sm text-muted-foreground">
-          Sources vidéo conservées (<code>.mkv.bkp</code>, <code>.mp4.bkp</code>, <code>.avi.bkp</code>) et originaux photo (dossiers{" "}
+          Sources vidéo conservées (<code>.mkv.bkp</code>, <code>.mp4.bkp</code>, <code>.avi.bkp</code>), FLAC conservés (<code>.flac.bkp</code>) et originaux photo (dossiers{" "}
           <code>origin/</code>). La place n&apos;est vraiment libérée qu&apos;une fois supprimées :
           vérifie d&apos;abord le fichier optimisé.
         </p>
@@ -160,6 +160,8 @@ export default function BackupsPage() {
                   <span className="flex items-start gap-2 font-mono text-xs break-all">
                     {entry.kind === "video" ? (
                       <Film className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    ) : entry.kind === "audio" ? (
+                      <Music className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                     ) : (
                       <ImageIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                     )}

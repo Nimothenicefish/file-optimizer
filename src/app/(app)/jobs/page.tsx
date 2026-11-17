@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatGain, formatRemaining, formatSize } from "@/lib/format";
+import { AUDIO_QUALITY_LABEL, isAudioQuality } from "@/lib/audioSettings";
 import type { KindStats, Stats } from "@/lib/stats";
 
 type Job = {
@@ -29,6 +30,7 @@ type Job = {
   video_crf: number | null;
   video_preset: string | null;
   video_profile: string | null;
+  audio_quality: string | null;
   progress: number | null;
   cancel_requested: number;
   remaining_ms: number | null;
@@ -240,23 +242,25 @@ export default function JobsPage() {
       <div>
         <h2 className="text-lg font-semibold tracking-tight">Traitements</h2>
         <p className="text-sm text-muted-foreground">
-          Un job = une photo ou une vidéo en cours d&apos;optimisation ou déjà traitée.
+          Un job = une photo, une vidéo ou un morceau en cours d&apos;optimisation ou déjà traitée.
         </p>
       </div>
 
       {stats && (
-        <div className="panel grid gap-3 p-4 sm:grid-cols-3">
+        <div className="panel grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-primary/30 bg-primary/10 p-3">
             <p className="text-xs text-muted-foreground">Espace gagné au total</p>
             <p className="text-2xl font-bold text-primary">
-              {formatSize(stats.image.savedBytes + stats.video.savedBytes)}
+              {formatSize(stats.image.savedBytes + stats.video.savedBytes + stats.audio.savedBytes)}
             </p>
             <p className="text-xs text-muted-foreground">
-              {stats.image.processed + stats.video.processed} fichier(s) traité(s)
+              {stats.image.processed + stats.video.processed + stats.audio.processed} fichier(s)
+              traité(s)
             </p>
           </div>
           <KindStatsCard label="Photos" stats={stats.image} />
           <KindStatsCard label="Vidéos" stats={stats.video} />
+          <KindStatsCard label="Musique" stats={stats.audio} />
         </div>
       )}
 
@@ -449,7 +453,13 @@ export default function JobsPage() {
               {logJob?.file_path}
             </DialogTitle>
             <DialogDescription className="break-words">
-              {logJob?.kind === "video" ? (
+              {logJob?.kind === "audio" ? (
+                <>
+                  FLAC → MP3{" "}
+                  {isAudioQuality(logJob.audio_quality) ? AUDIO_QUALITY_LABEL[logJob.audio_quality] : ""} ·
+                  Conserve le FLAC (.bkp) : {logJob.keep_original ? "oui" : "non"}
+                </>
+              ) : logJob?.kind === "video" ? (
                 <>
                   Vidéo x265 ({PROFILE_LABEL[logJob.video_profile ?? ""] ?? "film"}) · CRF :{" "}
                   {logJob.video_crf} · Preset : {logJob.video_preset} · Conserve

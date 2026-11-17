@@ -3,6 +3,7 @@ import path from "node:path";
 import { FILES_DIR } from "@/lib/paths";
 import { ORIGIN_FOLDER_NAME, isSynologyEaDir } from "@/lib/naming";
 import type { JobKind } from "@/lib/queue/jobs";
+import { AUDIO_EXT } from "@/lib/audioSettings";
 import { VIDEO_EXT } from "@/lib/videoSettings";
 
 // Formats pris en charge : chacun est ré-encodé dans SON PROPRE format (pas
@@ -13,12 +14,13 @@ export const IMAGE_EXT = new Set(["jpg", "jpeg", "png", "webp", "avif"]);
 
 export class InvalidPathError extends Error {}
 
-// Type de média d'un fichier d'après son extension (voir IMAGE_EXT et
-// VIDEO_EXT), ou null s'il n'est pas pris en charge.
+// Type de média d'un fichier d'après son extension (voir IMAGE_EXT,
+// VIDEO_EXT et AUDIO_EXT), ou null s'il n'est pas pris en charge.
 export function mediaKind(fileName: string): JobKind | null {
   const ext = path.extname(fileName).slice(1).toLowerCase();
   if (IMAGE_EXT.has(ext)) return "image";
   if (VIDEO_EXT.has(ext)) return "video";
+  if (AUDIO_EXT.has(ext)) return "audio";
   return null;
 }
 
@@ -59,7 +61,7 @@ export function toPhotoRelPath(absPath: string): string {
 export type BrowseEntry = {
   name: string;
   path: string; // relatif à FILES_DIR
-  type: "directory" | "image" | "video" | "other";
+  type: "directory" | "image" | "video" | "audio" | "other";
   size?: number;
 };
 
@@ -97,8 +99,8 @@ export function listPhotoEntries(relPath: string): BrowseEntry[] {
   return entries;
 }
 
-// Liste récursivement tous les fichiers d'un type de média (photos OU
-// vidéos, jamais les deux : un scan de photos ne doit pas embarquer un
+// Liste récursivement tous les fichiers d'un type de média (photos, vidéos
+// OU musique, jamais plusieurs : un scan de photos ne doit pas embarquer un
 // encodage vidéo de plusieurs heures par surprise) sous relPath
 // (sous-dossiers compris), chemins ABSOLUS — pour le scan en masse. Ignore
 // les dossiers "origin" (déjà des originaux préservés par un passage

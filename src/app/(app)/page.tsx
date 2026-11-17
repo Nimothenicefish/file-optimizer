@@ -11,6 +11,7 @@ import {
   Folder,
   Image as ImageIcon,
   Loader2,
+  Music,
   Pause,
   Play,
   RefreshCw,
@@ -40,6 +41,13 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AUDIO_QUALITIES,
+  AUDIO_QUALITY_LABEL,
+  type AudioQuality,
+  DEFAULT_AUDIO_QUALITY,
+  isAudioQuality,
+} from "@/lib/audioSettings";
 import type { BatchEstimate } from "@/lib/eta";
 import {
   ELONGATED_RATIO,
@@ -67,16 +75,21 @@ import {
   type VideoProfile,
 } from "@/lib/videoSettings";
 
-type Mode = "image" | "video";
+type Mode = "image" | "video" | "audio";
+
+function isMode(value: unknown): value is Mode {
+  return value === "image" || value === "video" || value === "audio";
+}
 
 type Entry = {
   name: string;
   path: string;
-  type: "directory" | "image" | "video" | "other";
+  type: "directory" | "image" | "video" | "audio" | "other";
   size?: number;
 };
 
-const MODE_NOUN: Record<Mode, string> = { image: "photo(s)", video: "vidéo(s)" };
+const MODE_NOUN: Record<Mode, string> = { image: "photo(s)", video: "vidéo(s)", audio: "morceau(x)" };
+const MODE_PLURAL: Record<Mode, string> = { image: "photos", video: "vidéos", audio: "morceaux" };
 
 // "dossier/Film.MKV" -> "mkv".
 function extensionOf(filePath: string): string {
@@ -124,6 +137,7 @@ type BatchJob = {
 type BatchSummary = {
   images: number;
   videos: number;
+  audios: number;
   errors: number;
   cancelled: number;
   originalTotal: number;
@@ -170,6 +184,8 @@ type StoredSettings = Partial<{
   videoProfile: VideoProfile;
   keepVideoSource: boolean;
   videoFormats: VideoFormat[];
+  audioQuality: AudioQuality;
+  keepAudioSource: boolean;
 }>;
 
 function loadStoredSettings(): StoredSettings {
@@ -179,7 +195,7 @@ function loadStoredSettings(): StoredSettings {
       Number.isInteger(v) && (v as number) >= min && (v as number) <= max ? (v as number) : undefined;
     const bool = (v: unknown) => (typeof v === "boolean" ? v : undefined);
     return {
-      mode: raw.mode === "image" || raw.mode === "video" ? raw.mode : undefined,
+      mode: isMode(raw.mode) ? raw.mode : undefined,
       maxDimension: intIn(raw.maxDimension, 100, 20000),
       quality: intIn(raw.quality, 1, 100),
       keepOriginal: bool(raw.keepOriginal),
@@ -196,6 +212,8 @@ function loadStoredSettings(): StoredSettings {
       videoProfile: isVideoProfile(raw.videoProfile) ? raw.videoProfile : undefined,
       keepVideoSource: bool(raw.keepVideoSource),
       videoFormats: Array.isArray(raw.videoFormats) ? raw.videoFormats.filter(isVideoFormat) : undefined,
+      audioQuality: isAudioQuality(raw.audioQuality) ? raw.audioQuality : undefined,
+      keepAudioSource: bool(raw.keepAudioSource),
     };
   } catch {
     return {};
@@ -229,7 +247,10 @@ function summaryLabel(summary: BatchSummary): string {
   const parts: string[] = [];
   if (summary.images > 0) parts.push(`${summary.images} photo(s)`);
   if (summary.videos > 0) parts.push(`${summary.videos} vidéo(s)`);
-  return `${parts.join(" et ") || "Aucun fichier"} traitée(s)`;
+  if (summary.audios > 0) parts.push(`${summary.audios} morceau(x)`);
+  // "morceau" est masculin, "photo" et "vidéo" féminins.
+  const onlyAudio = summary.audios > 0 && summary.images + summary.videos === 0;
+  return `${parts.join(" et ") || "Aucun fichier"} ${onlyAudio ? "traité(s)" : "traitée(s)"}`;
 }
 
 function breadcrumbs(path: string): Array<{ label: string; path: string }> {
@@ -265,6 +286,9 @@ export default function BrowsePage() {
   const [keepVideoSource, setKeepVideoSource] = useState(false);
   // Formats vidéo pris en compte par le scan, l'analyse et la sélection.
   const [videoFormats, setVideoFormats] = useState<VideoFormat[]>([...VIDEO_FORMATS]);
+  // Musique : FLAC convertis en MP3.
+  const [audioQuality, setAudioQuality] = useState<AudioQuality>(DEFAULT_AUDIO_QUALITY);
+  const [keepAudioSource, setKeepAudioSource] = useState(true);
 
   const [scanning, setScanning] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -331,8 +355,9 @@ export default function BrowsePage() {
           return;
         }
         setSummary({
-          images: jobs.filter((j) => j.kind !== "video").length,
+          images: jobs.filter((j) => j.kind === "image").length,
           videos: jobs.filter((j) => j.kind === "video").length,
+          audios: jobs.filter((j) => j.kind === "audio").length,
           errors: jobs.filter((j) => j.status === "error").length,
           cancelled: jobs.filter((j) => j.status === "cancelled").length,
           originalTotal: jobs.reduce((sum, j) => sum + (j.original_size ?? 0), 0),
@@ -431,6 +456,8 @@ export default function BrowsePage() {
     videoPreset,
     videoProfile,
     keepVideoSource,
+    audioQuality,
+    keepAudioSource,
   };
 
   // Lecture une seule fois au montage (le stockage navigateur n'existe pas
@@ -450,6 +477,8 @@ export default function BrowsePage() {
     if (stored.videoProfile) setVideoProfile(stored.videoProfile);
     if (stored.keepVideoSource != null) setKeepVideoSource(stored.keepVideoSource);
     if (stored.videoFormats) setVideoFormats(stored.videoFormats);
+    if (stored.audioQuality) setAudioQuality(stored.audioQuality);
+    if (stored.keepAudioSource != null) setKeepAudioSource(stored.keepAudioSource);
     setSettingsLoaded(true);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
@@ -469,6 +498,8 @@ export default function BrowsePage() {
     videoProfile,
     keepVideoSource,
     videoFormats,
+    audioQuality,
+    keepAudioSource,
   ]);
 
   async function scanFolder() {
@@ -570,10 +601,56 @@ export default function BrowsePage() {
             <Film />
             Vidéos
           </TabsTrigger>
+          <TabsTrigger value="audio" className={MODE_TAB_CLASS}>
+            <Music />
+            Musique
+          </TabsTrigger>
         </TabsList>
       </Tabs>
 
-      {mode === "video" ? (
+      {mode === "audio" ? (
+        <div className="panel flex flex-col gap-3 p-4">
+          <h3 className="text-sm font-medium">Réglages musique (conversion FLAC → MP3)</h3>
+          <div className="flex flex-wrap items-end gap-5">
+            <div className="space-y-1.5">
+              <Label>Qualité MP3</Label>
+              <Select value={audioQuality} onValueChange={(v) => setAudioQuality(v as AudioQuality)}>
+                <SelectTrigger className="w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AUDIO_QUALITIES.map((q) => (
+                    <SelectItem key={q} value={q}>
+                      {AUDIO_QUALITY_LABEL[q]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Label className="flex items-center gap-2 pb-1.5">
+              <Checkbox
+                checked={keepAudioSource}
+                onCheckedChange={(c) => setKeepAudioSource(c === true)}
+              />
+              Conserver le FLAC (renommé en .flac.bkp)
+            </Label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Chaque FLAC devient un MP3 du même nom dans le même dossier (chanson.flac →
+            chanson.mp3). Tags (titre, artiste, album, artiste de l&apos;album, n° de piste et de
+            disque, année, genre…) et pochette intégrée sont recopiés en ID3v2.3, lu par tous les
+            lecteurs et par Emby, puis vérifiés avant de toucher au FLAC. Une source hi-res (plus de
+            48 kHz) est rééchantillonnée et une source multicanal réduite en stéréo, limites du
+            format MP3. Un MP3 du même nom déjà présent n&apos;est jamais écrasé : le morceau passe en
+            erreur. Quelques secondes par morceau.
+          </p>
+          <p className="text-xs text-warning">
+            Conversion avec perte, définitive{keepAudioSource ? " une fois les .flac.bkp supprimés" : ""}{" "}
+            : un MP3 ne redevient jamais un FLAC. Convertis avant d&apos;ajouter le dossier à une
+            bibliothèque (Emby…), pour qu&apos;elle n&apos;indexe que les MP3.
+          </p>
+        </div>
+      ) : mode === "video" ? (
         <div className="panel flex flex-col gap-3 p-4">
           <h3 className="text-sm font-medium">Réglages vidéo (ré-encodage x265)</h3>
           <div className="flex flex-wrap items-end gap-5">
@@ -809,7 +886,7 @@ export default function BrowsePage() {
           </Button>
         )}
         <Button onClick={selectAllHere} disabled={noVideoFormat} variant="outline">
-          Sélectionner les {mode === "video" ? "vidéos" : "photos"} de ce dossier
+          Sélectionner les {MODE_PLURAL[mode]} de ce dossier
         </Button>
         {mode === "video" && (
           <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -874,6 +951,8 @@ export default function BrowsePage() {
                           <ImageIcon className="size-4 text-muted-foreground" />
                         ) : entry.type === "video" ? (
                           <Film className="size-4 text-muted-foreground" />
+                        ) : entry.type === "audio" ? (
+                          <Music className="size-4 text-muted-foreground" />
                         ) : (
                           <File className="size-4 text-muted-foreground" />
                         )}
@@ -917,7 +996,7 @@ export default function BrowsePage() {
             Vider la sélection
           </Button>
           <Button onClick={optimizeSelection} disabled={enqueuing} className="ml-auto">
-            {enqueuing ? "Mise en file…" : `Optimiser la sélection (${selected.size})`}
+            {enqueuing ? "Mise en file…" : `${mode === "audio" ? "Convertir en MP3" : "Optimiser"} la sélection (${selected.size})`}
           </Button>
         </div>
       )}

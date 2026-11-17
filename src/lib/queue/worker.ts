@@ -1,10 +1,12 @@
 import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import { DEFAULT_AUDIO_QUALITY, isAudioQuality } from "@/lib/audioSettings";
 import { db } from "@/lib/db";
 import { isImageConvertTarget } from "@/lib/imageLimits";
+import { optimizeAudio } from "@/lib/pipeline/optimizeAudio";
 import { optimizeImage } from "@/lib/pipeline/optimizeImage";
 import { optimizeVideo, partPathFor } from "@/lib/pipeline/optimizeVideo";
-import { isCancelRequested } from "@/lib/queue/jobs";
+import { type JobKind, isCancelRequested } from "@/lib/queue/jobs";
 import { isQueuePaused } from "@/lib/queueSettings";
 import { recordJobStats } from "@/lib/stats";
 import {
@@ -29,6 +31,7 @@ type JobRow = {
   video_crf: number | null;
   video_preset: string | null;
   video_profile: string | null;
+  audio_quality: string | null;
 };
 
 // Écritures en base de l'avancement d'un encodage vidéo espacées d'au moins
@@ -109,6 +112,17 @@ function runOptimization(job: JobRow, signal: AbortSignal, freezer: VideoFreezer
     });
   }
 
+  if (job.kind === "audio") {
+    return optimizeAudio({
+      filePath: job.file_path,
+      quality: isAudioQuality(job.audio_quality) ? job.audio_quality : DEFAULT_AUDIO_QUALITY,
+      keepSource: job.keep_original === 1,
+      // Pas de gel en pause, comme une photo : quelques secondes par morceau.
+      signal,
+      onProgress,
+    });
+  }
+
   return optimizeImage({
     filePath: job.file_path,
     maxDimension: job.max_dimension,
@@ -119,6 +133,15 @@ function runOptimization(job: JobRow, signal: AbortSignal, freezer: VideoFreezer
     signal,
     onProgress,
   });
+}
+
+function jobKind(kind: string): JobKind {
+  return kind === "video" || kind === "audio" ? kind : "image";
+}
+
+// Fichier temporaire (<source>.part) écrit par ffmpeg : vidéos et musique.
+function usesPartFile(kind: string): boolean {
+  return kind === "video" || kind === "audio";
 }
 
 function appendLog(jobId: string, line: string) {
@@ -175,11 +198,11 @@ async function processJob(job: JobRow) {
         : `optimisé : ${result.originalSize} -> ${result.optimizedSize} octets`
     );
     if (result.finalPath !== job.file_path) {
-      // Photo convertie en JPG, ou AVI devenu MKV.
+      // Photo convertie en JPG/WebP, AVI devenu MKV, FLAC devenu MP3.
       appendLog(job.id, `nouveau nom : ${result.finalPath}`);
     }
     setStatus(job.id, "done");
-    recordJobStats(job.kind === "video" ? "video" : "image", result.originalSize, result.optimizedSize);
+    recordJobStats(jobKind(job.kind), result.originalSize, result.optimizedSize);
   } catch (err) {
     if (shuttingDown) return;
     if (controller.signal.aborted) {
@@ -213,7 +236,7 @@ export function requeueOnShutdown() {
   const { job, controller } = current;
   controller.abort();
   const partPath = partPathFor(job.file_path);
-  if (job.kind === "video" && fs.existsSync(partPath)) fs.unlinkSync(partPath);
+  if (usesPartFile(job.kind) && fs.existsSync(partPath)) fs.unlinkSync(partPath);
   db.prepare(
     `UPDATE jobs SET status = 'pending', started_at = NULL, progress = NULL, paused_at = NULL,
                      paused_ms = 0, cancel_requested = 0, updated_at = datetime('now')
@@ -260,7 +283,7 @@ export function recoverInterruptedJobs() {
     // (incomplet) traînerait sinon à côté de la source, qui elle n'a jamais
     // été touchée (remplacée seulement à la toute fin).
     const partPath = partPathFor(job.file_path);
-    if (job.kind === "video" && fs.existsSync(partPath)) {
+    if (usesPartFile(job.kind) && fs.existsSync(partPath)) {
       fs.unlinkSync(partPath);
     }
     appendLog(

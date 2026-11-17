@@ -26,7 +26,7 @@ export function recordJobStats(kind: JobKind, originalSize: number, optimizedSiz
 
 export function getStats(): Stats {
   const empty: KindStats = { processed: 0, optimized: 0, originalBytes: 0, savedBytes: 0 };
-  const stats: Stats = { image: { ...empty }, video: { ...empty } };
+  const stats: Stats = { image: { ...empty }, video: { ...empty }, audio: { ...empty } };
   const rows = db.prepare("SELECT * FROM stats").all() as Array<{
     kind: string;
     processed: number;
@@ -35,7 +35,7 @@ export function getStats(): Stats {
     saved_bytes: number;
   }>;
   for (const row of rows) {
-    if (row.kind !== "image" && row.kind !== "video") continue;
+    if (row.kind !== "image" && row.kind !== "video" && row.kind !== "audio") continue;
     stats[row.kind] = {
       processed: row.processed,
       optimized: row.optimized,

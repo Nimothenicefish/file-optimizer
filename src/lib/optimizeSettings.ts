@@ -1,3 +1,4 @@
+import { DEFAULT_AUDIO_QUALITY, isAudioQuality } from "@/lib/audioSettings";
 import { DEFAULT_MAX_DIMENSION, DEFAULT_QUALITY, isImageConvertTarget } from "@/lib/imageLimits";
 import type { EnqueueParams, JobKind } from "@/lib/queue/jobs";
 import {
@@ -17,6 +18,7 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 export type OptimizeSettings = Omit<EnqueueParams, "filePath" | "kind" | "keepOriginal"> & {
   keepOriginal: boolean; // photos : origin/ (activé par défaut)
   keepVideoSource: boolean; // vidéos : <nom>.<ext>.bkp (désactivé par défaut)
+  keepAudioSource: boolean; // musique : <nom>.flac.bkp (activé par défaut)
 };
 
 // Réglages d'optimisation envoyés par l'UI (scan ou sélection manuelle),
@@ -34,15 +36,13 @@ export function parseOptimizeSettings(body: Record<string, unknown> | null): Opt
     videoPreset: isVideoPreset(body?.videoPreset) ? body.videoPreset : DEFAULT_VIDEO_PRESET,
     videoProfile: isVideoProfile(body?.videoProfile) ? body.videoProfile : DEFAULT_VIDEO_PROFILE,
     keepVideoSource: body?.keepVideoSource === true,
+    audioQuality: isAudioQuality(body?.audioQuality) ? body.audioQuality : DEFAULT_AUDIO_QUALITY,
+    keepAudioSource: body?.keepAudioSource !== false,
   };
 }
 
 export function toEnqueueParams(filePath: string, kind: JobKind, settings: OptimizeSettings): EnqueueParams {
-  const { keepVideoSource, ...rest } = settings;
-  return {
-    ...rest,
-    filePath,
-    kind,
-    keepOriginal: kind === "video" ? keepVideoSource : settings.keepOriginal,
-  };
+  const { keepVideoSource, keepAudioSource, ...rest } = settings;
+  const keepOriginal = { image: settings.keepOriginal, video: keepVideoSource, audio: keepAudioSource }[kind];
+  return { ...rest, filePath, kind, keepOriginal };
 }

@@ -1,17 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
+import { AUDIO_BACKUP_SUFFIX, AUDIO_EXT, AUDIO_OUTPUT_EXT } from "@/lib/audioSettings";
 import { ORIGIN_FOLDER_NAME, isSynologyEaDir } from "@/lib/naming";
 import { FILES_DIR } from "@/lib/paths";
 import { IMAGE_EXT, resolvePhotoPath, toPhotoRelPath } from "@/lib/photoBrowse";
 import { VIDEO_BACKUP_SUFFIX, VIDEO_EXT, videoOutputExt } from "@/lib/videoSettings";
 
 // Sauvegardes laissées par l'app : sources vidéo conservées (film.mkv.bkp, film.avi.bkp,
-// voir optimizeVideo.ts) et originaux photo déplacés dans origin/ (voir
+// voir optimizeVideo.ts), FLAC conservés (chanson.flac.bkp, voir
+// optimizeAudio.ts) et originaux photo déplacés dans origin/ (voir
 // optimizeImage.ts). Tant qu'elles existent, la place "gagnée" ne l'est pas
 // vraiment : cette page permet de les supprimer une fois le résultat vérifié.
 export type BackupEntry = {
   path: string; // relatif à FILES_DIR
-  kind: "video" | "image";
+  kind: "video" | "audio" | "image";
   size: number;
   modifiedAt: number;
   // Fichier optimisé correspondant (null si introuvable : la sauvegarde est
@@ -43,6 +45,18 @@ function isVideoBackupName(name: string): boolean {
   return VIDEO_EXT.has(path.extname(inner).slice(1).toLowerCase());
 }
 
+function isAudioBackupName(name: string): boolean {
+  if (!name.toLowerCase().endsWith(AUDIO_BACKUP_SUFFIX)) return false;
+  const inner = name.slice(0, -AUDIO_BACKUP_SUFFIX.length);
+  return AUDIO_EXT.has(path.extname(inner).slice(1).toLowerCase());
+}
+
+// Sauvegarde posée à côté du résultat (vidéo, musique), par opposition aux
+// originaux photo rangés dans origin/.
+function isSideBackupName(name: string): boolean {
+  return isVideoBackupName(name) || isAudioBackupName(name);
+}
+
 // Fichier optimisé d'une sauvegarde (chemin absolu), d'après les règles de
 // nommage de l'app ; null si aucun candidat n'existe.
 function findOptimized(backupPath: string): string | null {
@@ -63,6 +77,15 @@ function findOptimized(backupPath: string): string | null {
     return candidates.map((c) => path.join(dir, c)).find((c) => fileSize(c) != null) ?? null;
   }
 
+  if (isAudioBackupName(name)) {
+    // chanson.flac.bkp (ou chanson_1.flac.bkp) -> chanson.mp3
+    const inner = name.slice(0, -AUDIO_BACKUP_SUFFIX.length);
+    for (const base of [inner, withoutCollisionSuffix(inner)]) {
+      if (base) candidates.push(`${path.basename(base, path.extname(base))}.${AUDIO_OUTPUT_EXT}`);
+    }
+    return candidates.map((c) => path.join(dir, c)).find((c) => fileSize(c) != null) ?? null;
+  }
+
   // Original photo : <dossier>/origin/<nom> -> <dossier>/<nom>, ou en
   // .jpg/.webp si une conversion forcée était active.
   const parent = path.dirname(dir);
@@ -76,7 +99,7 @@ function findOptimized(backupPath: string): string | null {
 
 function isBackupPath(absPath: string): boolean {
   const name = path.basename(absPath);
-  if (isVideoBackupName(name)) return true;
+  if (isSideBackupName(name)) return true;
   const ext = path.extname(name).slice(1).toLowerCase();
   return path.basename(path.dirname(absPath)) === ORIGIN_FOLDER_NAME && IMAGE_EXT.has(ext);
 }
@@ -92,7 +115,11 @@ function toEntry(absPath: string): BackupEntry | null {
   const optimized = findOptimized(absPath);
   return {
     path: toPhotoRelPath(absPath),
-    kind: isVideoBackupName(path.basename(absPath)) ? "video" : "image",
+    kind: isVideoBackupName(path.basename(absPath))
+      ? "video"
+      : isAudioBackupName(path.basename(absPath))
+        ? "audio"
+        : "image",
     size: stat.size,
     modifiedAt: stat.mtimeMs,
     optimizedPath: optimized ? toPhotoRelPath(optimized) : null,
@@ -126,7 +153,7 @@ export function listBackups(): BackupEntry[] {
         } else {
           walk(full);
         }
-      } else if (isVideoBackupName(d.name)) {
+      } else if (isSideBackupName(d.name)) {
         const entry = toEntry(full);
         if (entry) entries.push(entry);
       }
